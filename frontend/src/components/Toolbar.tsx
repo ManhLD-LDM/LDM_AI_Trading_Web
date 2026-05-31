@@ -31,8 +31,10 @@ export default function Toolbar() {
   const [searchPair, setSearchPair] = useState('');
   
   const [isIndLibraryOpen, setIsIndLibraryOpen] = useState(false);
+  const [isIntervalOpen, setIsIntervalOpen] = useState(false);
 
   const pairRef = useRef<HTMLDivElement>(null);
+  const intervalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Fetch all pairs from Binance
@@ -50,6 +52,7 @@ export default function Toolbar() {
       
     const handleClickOutside = (event: MouseEvent) => {
       if (pairRef.current && !pairRef.current.contains(event.target as Node)) setIsPairOpen(false);
+      if (intervalRef.current && !intervalRef.current.contains(event.target as Node)) setIsIntervalOpen(false);
     };
     
     document.addEventListener('mousedown', handleClickOutside);
@@ -105,22 +108,37 @@ export default function Toolbar() {
       <div className="h-4 w-[1px] bg-slate-700"></div>
 
       {/* Timeframes */}
-      <div className="flex items-center overflow-x-auto custom-scrollbar no-scrollbar hide-scroll-indicator">
-        <div className="flex gap-1 shrink-0">
-          {ALL_INTERVALS.map((inv) => (
-            <button
-              key={inv.value}
-              onClick={() => setInterval(inv.value)}
-              className={`px-2 py-1 text-xs font-medium rounded-md transition-colors ${
-                interval === inv.value
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/50'
-                  : 'bg-transparent text-slate-400 hover:bg-slate-700 hover:text-slate-200 border border-transparent'
-              }`}
-            >
-              {inv.label}
-            </button>
-          ))}
-        </div>
+      <div className="relative shrink-0" ref={intervalRef}>
+        <button 
+          onClick={() => setIsIntervalOpen(!isIntervalOpen)}
+          className="flex items-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors justify-between min-w-[70px]"
+        >
+          {ALL_INTERVALS.find(i => i.value === interval)?.label || interval}
+          <ChevronDown size={14} className="text-slate-400" />
+        </button>
+        
+        {isIntervalOpen && (
+          <div className="absolute top-full left-0 mt-1 w-32 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden flex flex-col z-50">
+            <div className="p-2 border-b border-slate-700 bg-slate-900/50 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              Timeframe
+            </div>
+            <div className="grid grid-cols-2 gap-1 p-2">
+              {ALL_INTERVALS.map((inv) => (
+                <button
+                  key={inv.value}
+                  onClick={() => { setInterval(inv.value); setIsIntervalOpen(false); }}
+                  className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                    interval === inv.value
+                      ? 'bg-emerald-500/20 text-emerald-400'
+                      : 'bg-transparent text-slate-300 hover:bg-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  {inv.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>

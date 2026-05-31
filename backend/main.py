@@ -153,6 +153,27 @@ async def receive_webhook_signal(signal: WebhookSignal):
         })
     return {"status": "success", "message": "Signal processed"}
 
+class DrawingData(BaseModel):
+    data: list
+
+@app.get("/api/drawings/{symbol}")
+async def get_drawings(symbol: str, current_user_email: str = Depends(get_current_user)):
+    collection = db.client.get_database("ldm_trading").get_collection("drawings")
+    doc = await collection.find_one({"email": current_user_email, "symbol": symbol})
+    if doc and "data" in doc:
+        return {"data": doc["data"]}
+    return {"data": []}
+
+@app.post("/api/drawings/{symbol}")
+async def save_drawings(symbol: str, drawing: DrawingData, current_user_email: str = Depends(get_current_user)):
+    collection = db.client.get_database("ldm_trading").get_collection("drawings")
+    await collection.update_one(
+        {"email": current_user_email, "symbol": symbol},
+        {"$set": {"data": drawing.data}},
+        upsert=True
+    )
+    return {"status": "success"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)

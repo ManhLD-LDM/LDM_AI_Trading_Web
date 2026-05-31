@@ -1,9 +1,20 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, LogicalRange, HistogramData } from 'lightweight-charts';
+import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, LogicalRange, HistogramData, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts';
 import { useTradingStore, IndicatorConfig } from '@/store/useStore';
 import { INDICATOR_REGISTRY, IndicatorDef } from '@/lib/indicatorsRegistry';
+import DrawingToolbar from './DrawingToolbar';
+import { DrawingManager, getToolRegistry } from 'lightweight-charts-drawing';
+
+const drawingFactory = (type: string, data: any) => {
+  const registry = getToolRegistry();
+  const entry = registry.get(type);
+  if (entry) {
+    return entry.factory(data.id, data.anchors, data.style, data.options);
+  }
+  return null;
+};
 
 type KlineData = {
   time: UTCTimestamp;
@@ -15,9 +26,13 @@ type KlineData = {
 };
 
 export default function ChartComponent() {
+  const [isLoading, setIsLoading] = useState(false);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
+
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const drawingManagerRef = useRef<DrawingManager | null>(null);
   const indicatorsSeriesRef = useRef<{ [id: string]: ISeriesApi<any> }>({});
   
   const [chartData, setChartData] = useState<KlineData[]>([]);
@@ -25,7 +40,7 @@ export default function ChartComponent() {
   const isLoadingRef = useRef(false);
   const isInitialLoadRef = useRef(true);
 
-  const { pair, interval, signals, indicators } = useTradingStore();
+  const { pair, interval, signals, indicators, token } = useTradingStore();
 
   const fetchKlines = async (endTime?: number) => {
     try {
@@ -79,7 +94,7 @@ export default function ChartComponent() {
     // Custom price scales are configured when indicators are active
 
     chartRef.current = chart;
-    const candlestickSeries = chart.addCandlestickSeries({
+    const candlestickSeries = chart.addSeries(CandlestickSeries, {
       upColor: '#10b981', downColor: '#ef4444', borderVisible: false,
       wickUpColor: '#10b981', wickDownColor: '#ef4444',
       lastValueVisible: true,
@@ -90,8 +105,57 @@ export default function ChartComponent() {
     });
     seriesRef.current = candlestickSeries;
 
+    // Initialize Drawing Manager
+    const manager = new DrawingManager();
+    manager.attach(chart, candlestickSeries, chartContainerRef.current);
+    drawingManagerRef.current = manager;
+
+    // Listen to tool change
+    manager.on('tool:changed', (event: any) => {
+      setActiveTool(event.tool);
+    });
+
+    const saveDrawings = () => {
+      if (token) {
+        const drawingsJson = manager.exportDrawings();
+        fetch(`http://localhost:8000/api/drawings/${pair}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ data: drawingsJson })
+        }).catch(console.error);
+      }
+    };
+
+    // Auto-save drawings
+    manager.on('drawing:added', saveDrawings);
+    manager.on('drawing:updated', saveDrawings);
+    manager.on('drawing:removed', saveDrawings);
+    manager.on('drawing:cleared', saveDrawings);
+
     // Load initial data
     isInitialLoadRef.current = true;
+    
+    // Fetch drawings from DB
+    if (token) {
+      fetch(`http://localhost:8000/api/drawings/${pair}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.data && Array.isArray(data.data) && drawingManagerRef.current) {
+          // Temporarily clear old to load new
+          drawingManagerRef.current.clearAll();
+          drawingManagerRef.current.importDrawings(data.data, drawingFactory);
+        }
+      })
+      .catch(console.error);
+    }
+
     fetchKlines().then(data => {
       chartDataRef.current = data;
       setChartData(data);
@@ -140,6 +204,9 @@ export default function ChartComponent() {
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
 
     return () => {
+      if (drawingManagerRef.current) {
+        drawingManagerRef.current.detach();
+      }
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
       chart.remove();
     };
@@ -189,9 +256,13 @@ export default function ChartComponent() {
   }, [pair, interval]);
 
   // 3. Handle Markers
+  const markersPluginRef = useRef<any>(null);
   useEffect(() => {
     if (seriesRef.current) {
-      seriesRef.current.setMarkers(signals);
+      if (!markersPluginRef.current) {
+        markersPluginRef.current = createSeriesMarkers(seriesRef.current);
+      }
+      markersPluginRef.current.setMarkers(signals);
     }
   }, [signals]);
 
@@ -262,11 +333,11 @@ export default function ChartComponent() {
         const color = lineDef.colorParam && ind.params[lineDef.colorParam] ? ind.params[lineDef.colorParam] : lineDef.defaultColor || '#ffffff';
         
         if (lineDef.type === 'histogram') {
-          series = chartRef.current!.addHistogramSeries({
+          series = chartRef.current!.addSeries(HistogramSeries, {
             priceScaleId,
           });
         } else {
-          series = chartRef.current!.addLineSeries({
+          series = chartRef.current!.addSeries(LineSeries, {
             color,
             lineWidth: 2,
             priceScaleId,
@@ -302,5 +373,44 @@ export default function ChartComponent() {
 
   }, [chartData, indicators]);
 
-  return <div ref={chartContainerRef} className="w-full h-full" />;
+  const handleSelectTool = useCallback((tool: string | null) => {
+    if (drawingManagerRef.current) {
+      drawingManagerRef.current.setActiveTool(tool);
+      setActiveTool(tool);
+    }
+  }, []);
+
+  const handleClearAll = useCallback(() => {
+    if (drawingManagerRef.current) {
+      drawingManagerRef.current.clearAll();
+    }
+  }, []);
+
+  const handleDeleteSelected = useCallback(() => {
+    if (drawingManagerRef.current) {
+      const selectedId = drawingManagerRef.current.getSelectedDrawing()?.id;
+      if (selectedId) {
+        drawingManagerRef.current.removeDrawing(selectedId);
+      }
+    }
+  }, []);
+
+  return (
+    <div className="relative w-full h-full flex items-center justify-center bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group">
+      {isLoading && (
+        <div className="absolute top-4 right-4 bg-slate-800/80 px-3 py-1.5 rounded text-xs text-slate-300 font-medium z-10">
+          Loading...
+        </div>
+      )}
+      
+      <DrawingToolbar 
+        activeTool={activeTool} 
+        onSelectTool={handleSelectTool}
+        onClearAll={handleClearAll}
+        onDeleteSelected={handleDeleteSelected}
+      />
+
+      <div ref={chartContainerRef} className="w-full h-full" />
+    </div>
+  );
 }

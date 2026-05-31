@@ -3,10 +3,22 @@ import { useState } from 'react';
 import ChartComponent from '@/components/Chart';
 import Sidebar from '@/components/Sidebar';
 import Toolbar from '@/components/Toolbar';
-import { LineChart, History, Settings } from 'lucide-react';
+import { LineChart, History, Settings, User, LogOut } from 'lucide-react';
+import AuthModal from '@/components/AuthModal';
+import { useTradingStore } from '@/store/useStore';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'live' | 'backtest' | 'settings'>('live');
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const { user, logout } = useTradingStore();
+
+  const handleTabChange = (tab: 'live' | 'backtest' | 'settings') => {
+    if ((tab === 'backtest' || tab === 'settings') && !user) {
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setActiveTab(tab);
+  };
 
   return (
     <main className="flex h-screen w-full bg-slate-950 text-slate-200 overflow-hidden font-sans">
@@ -17,29 +29,51 @@ export default function Home() {
         </div>
         
         <button 
-          onClick={() => setActiveTab('live')}
-          className={`p-3 rounded-xl transition-all ${activeTab === 'live' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+          onClick={() => handleTabChange('live')}
+          className={`p-3 rounded-xl transition-all active:scale-95 ${activeTab === 'live' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
           title="Live Trading"
         >
           <LineChart size={24} />
         </button>
         
         <button 
-          onClick={() => setActiveTab('backtest')}
-          className={`p-3 rounded-xl transition-all ${activeTab === 'backtest' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+          onClick={() => handleTabChange('backtest')}
+          className={`p-3 rounded-xl transition-all active:scale-95 ${activeTab === 'backtest' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
           title="Backtest"
         >
           <History size={24} />
         </button>
         
         <button 
-          onClick={() => setActiveTab('settings')}
-          className={`p-3 rounded-xl transition-all ${activeTab === 'settings' ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+          onClick={() => handleTabChange('settings')}
+          className={`p-3 rounded-xl transition-all active:scale-95 ${activeTab === 'settings' ? 'bg-emerald-500/20 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'}`}
           title="Settings"
         >
           <Settings size={24} />
         </button>
+
+        <div className="mt-auto mb-4 flex flex-col gap-4">
+          {user ? (
+            <button 
+              onClick={logout}
+              className="p-3 rounded-xl transition-all text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 active:scale-95"
+              title="Sign Out"
+            >
+              <LogOut size={24} />
+            </button>
+          ) : (
+            <button 
+              onClick={() => setIsAuthModalOpen(true)}
+              className="p-3 rounded-xl transition-all text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 active:scale-95"
+              title="Sign In"
+            >
+              <User size={24} />
+            </button>
+          )}
+        </div>
       </div>
+
+      <AuthModal isOpen={isAuthModalOpen} onClose={() => setIsAuthModalOpen(false)} />
 
       {/* Main Content Area */}
       <div className="flex-1 flex min-w-0 h-full relative">
@@ -52,9 +86,14 @@ export default function Home() {
                   Live Trading Dashboard
                 </h1>
                 <div className="flex items-center gap-2 text-sm text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-md border border-slate-700/50">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
                   Binance WS Connected
                 </div>
+                {user && (
+                  <div className="ml-4 text-sm text-emerald-400 font-medium">
+                    {user.email}
+                  </div>
+                )}
               </header>
 
               <div className="flex-1 flex flex-col p-4 overflow-hidden">
@@ -146,7 +185,7 @@ export default function Home() {
                   </div>
                 </div>
                 
-                <button className="bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2 px-6 rounded-md transition-colors">
+                <button className="bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold py-2.5 px-6 rounded-lg transition-all active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.3)]">
                   Save Settings
                 </button>
               </div>

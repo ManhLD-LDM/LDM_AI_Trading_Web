@@ -1,4 +1,5 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import json
@@ -10,7 +11,11 @@ from database import connect_to_mongo, close_mongo_connection, db
 from binance_api import get_historical_klines
 from kronos_onnx import KronosInference
 from agents import TechnicalAgent, SentimentAgent, TraderAgent
-
+from auth import (
+    UserCreate, UserInDB, Token,
+    verify_password, get_password_hash, create_access_token, get_current_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES, timedelta
+)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
@@ -58,6 +63,61 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "ok"}
+
+@app.post("/api/auth/register", response_model=Token)
+async def register(user: UserCreate):
+    collection = db.client.get_database("ldm_trading").get_collection("users")
+    existing_user = await collection.find_one({"email": user.email})
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    hashed_password = get_password_hash(user.password)
+    new_user = {
+        "email": user.email,
+        "hashed_password": hashed_password,
+        "preferences": {}
+    }
+    await collection.insert_one(new_user)
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.email}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    collection = db.client.get_database("ldm_trading").get_collection("users")
+    user = await collection.find_one({"email": form_data.username})
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user["email"]}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/api/user/me")
+async def read_users_me(current_user_email: str = Depends(get_current_user)):
+    collection = db.client.get_database("ldm_trading").get_collection("users")
+    user = await collection.find_one({"email": current_user_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"email": user["email"], "preferences": user.get("preferences", {})}
+
+@app.put("/api/user/preferences")
+async def update_preferences(preferences: dict, current_user_email: str = Depends(get_current_user)):
+    collection = db.client.get_database("ldm_trading").get_collection("users")
+    await collection.update_one(
+        {"email": current_user_email},
+        {"$set": {"preferences": preferences}}
+    )
+    return {"status": "success", "preferences": preferences}
 
 class WebhookSignal(BaseModel):
     bot_name: str

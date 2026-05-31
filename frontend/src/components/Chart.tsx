@@ -55,8 +55,24 @@ export default function ChartComponent() {
       layout: { background: { type: ColorType.Solid, color: 'transparent' }, textColor: '#d1d5db' },
       grid: { vertLines: { color: '#374151', style: 1 }, horzLines: { color: '#374151', style: 1 } },
       crosshair: { mode: 0 },
-      rightPriceScale: { borderColor: '#374151' },
-      timeScale: { borderColor: '#374151', timeVisible: true, secondsVisible: false },
+      rightPriceScale: { borderColor: '#374151', autoScale: true },
+      timeScale: { 
+        borderColor: '#374151', 
+        timeVisible: true, 
+        secondsVisible: false,
+        shiftVisibleRangeOnNewBar: true,
+      },
+      handleScroll: {
+        mouseWheel: false, // Mouse wheel zooms instead of scrolling
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        mouseWheel: true,
+        axisPressedMouseMove: { time: true, price: true },
+        axisDoubleClickReset: true,
+      },
       autoSize: true,
     });
     
@@ -66,6 +82,11 @@ export default function ChartComponent() {
     const candlestickSeries = chart.addCandlestickSeries({
       upColor: '#10b981', downColor: '#ef4444', borderVisible: false,
       wickUpColor: '#10b981', wickDownColor: '#ef4444',
+      lastValueVisible: true,
+      priceLineVisible: true,
+      priceLineColor: '#10b981',
+      priceLineWidth: 1,
+      priceLineStyle: 3, // dashed
     });
     seriesRef.current = candlestickSeries;
 
@@ -192,7 +213,7 @@ export default function ChartComponent() {
         try {
           chartRef.current.removeSeries(series);
         } catch (e) {
-          console.warn("Failed to remove series:", e);
+          // Ignore harmless remove errors on unmount/re-render
         }
       }
     });

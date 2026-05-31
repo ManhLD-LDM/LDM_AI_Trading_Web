@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, LogicalRange } from 'lightweight-charts';
-import { useTradingStore } from '@/store/useStore';
-import { SMA, EMA, RSI, MACD } from 'technicalindicators';
+import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, LogicalRange, HistogramData } from 'lightweight-charts';
+import { useTradingStore, IndicatorConfig } from '@/store/useStore';
+import { INDICATOR_REGISTRY, IndicatorDef } from '@/lib/indicatorsRegistry';
 
 type KlineData = {
   time: UTCTimestamp;
@@ -93,7 +93,7 @@ export default function ChartComponent() {
           if (olderData.length > 0) {
             setChartData(prevData => {
               // Ensure strictly older
-              const filteredOlder = olderData.filter(d => d.time < prevData[0].time);
+              const filteredOlder = olderData.filter((d: KlineData) => d.time < prevData[0].time);
               if (filteredOlder.length === 0) return prevData;
               
               const newData = [...filteredOlder, ...prevData];
@@ -188,74 +188,106 @@ export default function ChartComponent() {
     
     // Clean up existing indicator series
     Object.values(indicatorsSeriesRef.current).forEach(series => {
-      chartRef.current?.removeSeries(series);
+      if (series && chartRef.current) {
+        try {
+          chartRef.current.removeSeries(series);
+        } catch (e) {
+          console.warn("Failed to remove series:", e);
+        }
+      }
     });
     indicatorsSeriesRef.current = {};
 
-    const closePrices = chartData.map(d => d.close);
+    const inputData = {
+      time: chartData.map(d => d.time as number),
+      open: chartData.map(d => d.open),
+      high: chartData.map(d => d.high),
+      low: chartData.map(d => d.low),
+      close: chartData.map(d => d.close),
+      volume: chartData.map(d => d.volume),
+    };
+
+    const activeIndicators = indicators.filter(ind => ind.active);
+    const oscillators = activeIndicators.filter(ind => INDICATOR_REGISTRY.find((d: IndicatorDef) => d.id === ind.indicatorId)?.placement === 'oscillator');
+    const totalOscillators = oscillators.length;
+
+    // Adjust main chart margin based on oscillators
+    const oscHeight = 0.15; // 15% of height per oscillator
+    const bottomMargin = totalOscillators > 0 ? (totalOscillators * oscHeight + 0.05) : 0.1;
     
-    indicators.filter(ind => ind.active).forEach(ind => {
-      if (ind.type === 'SMA' && ind.period) {
-        const smaValues = SMA.calculate({ period: ind.period, values: closePrices });
-        const lineSeries = chartRef.current!.addLineSeries({ color: ind.color, lineWidth: 2, priceScaleId: 'right' });
-        const seriesData = smaValues.map((val, i) => ({ time: chartData[i + ind.period! - 1].time, value: val }));
-        lineSeries.setData(seriesData);
-        indicatorsSeriesRef.current[ind.id] = lineSeries;
-      }
+    chartRef.current.priceScale('right').applyOptions({
+      scaleMargins: {
+        top: 0.1,
+        bottom: bottomMargin > 0.8 ? 0.8 : bottomMargin, // Cap at 80%
+      },
+    });
+
+    let oscIndex = 0;
+
+    activeIndicators.forEach(ind => {
+      const def = INDICATOR_REGISTRY.find(d => d.id === ind.indicatorId);
+      if (!def) return;
+
+      const results = def.calculate(inputData, ind.params);
       
-      if (ind.type === 'EMA' && ind.period) {
-        const emaValues = EMA.calculate({ period: ind.period, values: closePrices });
-        const lineSeries = chartRef.current!.addLineSeries({ color: ind.color, lineWidth: 2, priceScaleId: 'right' });
-        const seriesData = emaValues.map((val, i) => ({ time: chartData[i + ind.period! - 1].time, value: val }));
-        lineSeries.setData(seriesData);
-        indicatorsSeriesRef.current[ind.id] = lineSeries;
+      let priceScaleId = 'right';
+      let hasOscillator = false;
+      let topMargin = 0;
+      let botMargin = 0;
+
+      if (def.placement === 'oscillator') {
+        priceScaleId = `osc_${ind.instanceId}`;
+        hasOscillator = true;
+        topMargin = 1 - bottomMargin + (oscIndex * oscHeight);
+        botMargin = 1 - topMargin - oscHeight + 0.02; // Small gap
+        oscIndex++;
       }
 
-      if (ind.type === 'RSI' && ind.period) {
-        const rsiValues = RSI.calculate({ period: ind.period, values: closePrices });
-        const lineSeries = chartRef.current!.addLineSeries({ color: ind.color, lineWidth: 1.5, priceScaleId: 'rsi' });
-        chartRef.current!.priceScale('rsi').applyOptions({ visible: true, scaleMargins: { top: 0.8, bottom: 0 } });
-        const seriesData = rsiValues.map((val, i) => ({ time: chartData[i + ind.period!].time, value: val }));
-        lineSeries.setData(seriesData);
-        indicatorsSeriesRef.current[ind.id] = lineSeries;
-      }
+      // Create series
+      def.lines.forEach(lineDef => {
+        let series: ISeriesApi<any>;
+        const color = lineDef.colorParam && ind.params[lineDef.colorParam] ? ind.params[lineDef.colorParam] : lineDef.defaultColor || '#ffffff';
+        
+        if (lineDef.type === 'histogram') {
+          series = chartRef.current!.addHistogramSeries({
+            priceScaleId,
+          });
+        } else {
+          series = chartRef.current!.addLineSeries({
+            color,
+            lineWidth: 2,
+            priceScaleId,
+          });
+        }
+        
+        indicatorsSeriesRef.current[`${ind.instanceId}_${lineDef.id}`] = series;
 
-      if (ind.type === 'MACD') {
-        const macdValues = MACD.calculate({ fastPeriod: 12, slowPeriod: 26, signalPeriod: 9, SimpleMAOscillator: false, SimpleMASignal: false, values: closePrices });
-        
-        const macdLine = chartRef.current!.addLineSeries({ color: '#2962FF', lineWidth: 1.5, priceScaleId: 'macd' });
-        const signalLine = chartRef.current!.addLineSeries({ color: '#FF6D00', lineWidth: 1.5, priceScaleId: 'macd' });
-        const histogram = chartRef.current!.addHistogramSeries({ priceScaleId: 'macd' });
-        
-        chartRef.current!.priceScale('macd').applyOptions({ visible: true, scaleMargins: { top: 0.8, bottom: 0 } });
-        
-        const macdData: any[] = [];
-        const signalData: any[] = [];
-        const histData: any[] = [];
-
-        macdValues.forEach((val, i) => {
-          if (val.MACD !== undefined) {
-            const time = chartData[i + 25].time; // MACD needs 26 periods
-            macdData.push({ time, value: val.MACD });
-            if (val.signal !== undefined) signalData.push({ time, value: val.signal });
-            if (val.histogram !== undefined) {
-              const color = val.histogram > 0 ? '#26A69A' : '#EF5350';
-              histData.push({ time, value: val.histogram, color });
+        // Map data
+        const seriesData = results
+          .filter(r => r[lineDef.id] !== undefined && r[lineDef.id] !== null && !Number.isNaN(r[lineDef.id]))
+          .map(r => {
+            if (lineDef.type === 'histogram' && def.id === 'macd') {
+              const histColor = r[lineDef.id] > 0 ? '#26A69A' : '#EF5350';
+              return { time: r.time, value: r[lineDef.id], color: histColor } as HistogramData;
             }
+            return { time: r.time, value: r[lineDef.id] };
+          });
+          
+        series.setData(seriesData);
+      });
+
+      if (hasOscillator) {
+        chartRef.current!.priceScale(priceScaleId).applyOptions({
+          visible: true,
+          scaleMargins: {
+            top: topMargin,
+            bottom: botMargin > 0 ? botMargin : 0,
           }
         });
-
-        macdLine.setData(macdData);
-        signalLine.setData(signalData);
-        histogram.setData(histData);
-        
-        indicatorsSeriesRef.current[`${ind.id}_macd`] = macdLine;
-        indicatorsSeriesRef.current[`${ind.id}_signal`] = signalLine;
-        indicatorsSeriesRef.current[`${ind.id}_hist`] = histogram;
       }
     });
 
-  }, [indicators, chartData]);
+  }, [chartData, indicators]);
 
   return <div ref={chartContainerRef} className="w-full h-full" />;
 }

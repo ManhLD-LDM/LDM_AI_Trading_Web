@@ -1,7 +1,8 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useTradingStore } from '@/store/useStore';
-import { Search, ChevronDown, Activity, Check } from 'lucide-react';
+import { Search, ChevronDown, Activity } from 'lucide-react';
+import IndicatorLibraryModal from './IndicatorLibraryModal';
 
 const ALL_INTERVALS = [
   { label: '1s', value: '1s' },
@@ -29,10 +30,9 @@ export default function Toolbar() {
   const [isPairOpen, setIsPairOpen] = useState(false);
   const [searchPair, setSearchPair] = useState('');
   
-  const [isIndOpen, setIsIndOpen] = useState(false);
+  const [isIndLibraryOpen, setIsIndLibraryOpen] = useState(false);
 
   const pairRef = useRef<HTMLDivElement>(null);
-  const indRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Fetch all pairs from Binance
@@ -50,7 +50,6 @@ export default function Toolbar() {
       
     const handleClickOutside = (event: MouseEvent) => {
       if (pairRef.current && !pairRef.current.contains(event.target as Node)) setIsPairOpen(false);
-      if (indRef.current && !indRef.current.contains(event.target as Node)) setIsIndOpen(false);
     };
     
     document.addEventListener('mousedown', handleClickOutside);
@@ -126,40 +125,21 @@ export default function Toolbar() {
 
       <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>
 
-      {/* Indicators Dropdown */}
-      <div className="relative shrink-0" ref={indRef}>
+      {/* Indicators Modal Trigger */}
+      <div className="relative shrink-0">
         <button 
-          onClick={() => setIsIndOpen(!isIndOpen)}
+          onClick={() => setIsIndLibraryOpen(true)}
           className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-indigo-500/20 transition-colors"
         >
           <Activity size={14} />
           Indicators
         </button>
-        
-        {isIndOpen && (
-          <div className="absolute top-full right-0 mt-1 w-48 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden flex flex-col">
-            <div className="p-2 border-b border-slate-700 bg-slate-900/50 text-xs font-semibold text-slate-400 uppercase tracking-wider">
-              Technical Indicators
-            </div>
-            <div className="py-1">
-              {indicators.map(ind => (
-                <button
-                  key={ind.id}
-                  onClick={() => toggleIndicator(ind.id)}
-                  className="w-full flex items-center justify-between px-3 py-2 text-sm text-slate-300 hover:bg-slate-700 transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: ind.color || '#fff' }}></span>
-                    {ind.type} {ind.period ? `(${ind.period})` : ''}
-                  </span>
-                  {ind.active && <Check size={14} className="text-emerald-400" />}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
+      <IndicatorLibraryModal 
+        isOpen={isIndLibraryOpen} 
+        onClose={() => setIsIndLibraryOpen(false)} 
+      />
     </div>
   );
 }

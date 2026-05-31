@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+motor
+onnxruntime
+numpy
+python-dotenv
+websockets
+httpx
+pydantic
+google-generativeai

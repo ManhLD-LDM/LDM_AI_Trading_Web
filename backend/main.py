@@ -2,6 +2,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import json
+import time
+from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
 from database import connect_to_mongo, close_mongo_connection, db
@@ -57,6 +59,40 @@ async def root():
 async def health_check():
     return {"status": "ok"}
 
+class WebhookSignal(BaseModel):
+    bot_name: str
+    symbol: str
+    action: str
+    price: float
+    reason: str
+    confidence: int = 100
+
+@app.post("/api/webhook/signals")
+async def receive_webhook_signal(signal: WebhookSignal):
+    # Broadcast to frontend
+    await manager.broadcast(json.dumps({
+        "type": "ai_log",
+        "agent_name": f"Webhook Bot ({signal.bot_name})",
+        "thought": f"Decision: {signal.action}. {signal.reason}",
+        "action": signal.action,
+        "price": signal.price,
+        "timestamp": int(time.time())
+    }))
+    
+    # Store in DB
+    if db.client:
+        collection = db.client.get_database("ldm_trading_db")["trade_signals"]
+        await collection.insert_one({
+            "bot_name": signal.bot_name,
+            "symbol": signal.symbol,
+            "action": signal.action,
+            "confidence": signal.confidence,
+            "price": signal.price,
+            "reason": signal.reason,
+            "source": "webhook"
+        })
+    return {"status": "success", "message": "Signal processed"}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -100,7 +136,10 @@ async def ai_trading_loop():
             await manager.broadcast(json.dumps({
                 "type": "ai_log", 
                 "agent_name": "Trader Agent", 
-                "thought": f"Decision: {decision['action']}. {decision['reason']}"
+                "thought": f"Decision: {decision['action']}. {decision['reason']}",
+                "action": decision['action'],
+                "price": float(current_price),
+                "timestamp": int(history_data[-1][0] / 1000)
             }))
             
             # Store in DB (if DB is connected)

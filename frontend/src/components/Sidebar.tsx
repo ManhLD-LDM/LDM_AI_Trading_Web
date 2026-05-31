@@ -1,16 +1,23 @@
 'use client';
 import { useEffect, useState, useRef } from 'react';
+import { useTradingStore } from '@/store/useStore';
+import { UTCTimestamp } from 'lightweight-charts';
 
 type AIEvent = {
   type: string;
   agent_name: string;
   thought: string;
   timestamp?: string;
+  action?: string;
+  price?: number;
+  ts?: number; // unix timestamp from backend
 };
 
 export default function Sidebar() {
   const [events, setEvents] = useState<AIEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  const { pair, interval, addSignal } = useTradingStore();
 
   useEffect(() => {
     // Connect to backend WebSocket
@@ -22,6 +29,17 @@ export default function Sidebar() {
         if (data.type === 'ai_log') {
           const timestamp = new Date().toLocaleTimeString();
           setEvents(prev => [...prev, { ...data, timestamp }]);
+          
+          // Add marker to chart if Trader Agent made a decision
+          if (data.agent_name === 'Trader Agent' && data.action && data.action !== 'HOLD') {
+            addSignal({
+              time: (data.timestamp || (new Date().getTime() / 1000)) as UTCTimestamp,
+              position: data.action === 'BUY' ? 'belowBar' : 'aboveBar',
+              color: data.action === 'BUY' ? '#10b981' : '#ef4444',
+              shape: data.action === 'BUY' ? 'arrowUp' : 'arrowDown',
+              text: `${data.action} @ ${data.price || ''}`,
+            });
+          }
         }
       } catch (e) {
         console.error("Failed to parse ws message", e);
@@ -31,7 +49,7 @@ export default function Sidebar() {
     return () => {
       ws.close();
     };
-  }, []);
+  }, [addSignal]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -84,7 +102,11 @@ export default function Sidebar() {
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Pair</span>
-            <span className="text-white">BTCUSDT</span>
+            <span className="text-white">{pair}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Timeframe</span>
+            <span className="text-white">{interval}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Backend</span>

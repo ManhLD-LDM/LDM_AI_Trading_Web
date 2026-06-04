@@ -28,7 +28,8 @@ async def connect_to_mongo():
         )
         print("TTL Index verified for trade_signals.")
     except Exception as e:
-        print(f"Could not connect to MongoDB: {e}")
+        print(f"CRITICAL: Could not connect to MongoDB: {e}")
+        raise RuntimeError("Database connection failed. Check MONGO_URI in .env file.")
 
 async def close_mongo_connection():
     if db.client:

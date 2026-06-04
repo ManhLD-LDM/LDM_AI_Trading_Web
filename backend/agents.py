@@ -1,5 +1,6 @@
 import os
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import httpx
 import asyncio
 import json
@@ -7,25 +8,26 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Cấu hình Gemini
+# Cấu hình Gemini SDK mới
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+client = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    
-# Sử dụng model flash miễn phí và nhanh
-model = genai.GenerativeModel('gemini-1.5-flash')
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
 async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: str = "text/plain") -> str:
     """Gọi Gemini API bất đồng bộ"""
-    if not GEMINI_API_KEY:
+    if not client:
         return "MOCK_RESPONSE: Missing Gemini API Key"
     
     try:
         prompt = f"{system_prompt}\n\nUSER INPUT:\n{user_prompt}"
         response = await asyncio.to_thread(
-            model.generate_content,
-            prompt,
-            generation_config={"response_mime_type": response_mime_type}
+            client.models.generate_content,
+            model='gemini-1.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type=response_mime_type,
+            )
         )
         return response.text
     except Exception as e:

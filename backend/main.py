@@ -21,7 +21,9 @@ from auth import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
+    ai_task = asyncio.create_task(ai_trading_loop())
     yield
+    ai_task.cancel()
     await close_mongo_connection()
 
 app = FastAPI(title="LDM AI Trading Backend", lifespan=lifespan)
@@ -48,11 +50,15 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
+        dead_connections = []
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
             except Exception:
-                pass
+                dead_connections.append(connection)
+        
+        for dead in dead_connections:
+            self.disconnect(dead)
 
 manager = ConnectionManager()
 kronos_model = KronosInference()
@@ -245,14 +251,10 @@ async def ai_trading_loop():
     while True:
         try:
             tasks = [run_analysis_for_symbol(sym) for sym in symbols]
-            await asyncio.gather(*tasks)
-            # Wait for next cycle (e.g. 5 minutes)
-            await asyncio.sleep(300)
-            
+            await asyncio.gather(*tasks, return_exceptions=True)
         except Exception as e:
             print(f"Loop error: {e}")
-            await asyncio.sleep(60) # Wait before retry on error
+        finally:
+            # Wait for next cycle (e.g. 5 minutes)
+            await asyncio.sleep(300)
 
-@app.on_event("startup")
-async def startup_event():
-    asyncio.create_task(ai_trading_loop())

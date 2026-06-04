@@ -122,7 +122,8 @@ export default function ChartComponent() {
         saveTimeout = setTimeout(() => {
           if (!drawingManagerRef.current) return;
           const drawingsJson = manager.exportDrawings();
-          const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+          const host = window.location.hostname;
+          const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
           fetch(`${API_URL}/api/drawings/${pair}`, {
             method: 'POST',
             headers: {
@@ -146,7 +147,8 @@ export default function ChartComponent() {
     
     // Fetch drawings from DB
     if (token) {
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const host = window.location.hostname;
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
       fetch(`${API_URL}/api/drawings/${pair}`, {
         headers: {
           'Authorization': `Bearer ${token}`

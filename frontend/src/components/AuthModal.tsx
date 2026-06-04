@@ -41,7 +41,8 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
         headers = { 'Content-Type': 'application/json' };
       }
 
-      const res = await fetch(`http://localhost:8000${endpoint}`, {
+      const host = window.location.hostname;
+      const res = await fetch(`http://${host}:8000${endpoint}`, {
         method: 'POST',
         headers,
         body,
@@ -56,7 +57,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
       const token = data.access_token;
       
       // Fetch user profile
-      const profileRes = await fetch('http://localhost:8000/api/user/me', {
+      const profileRes = await fetch(`http://${host}:8000/api/user/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       

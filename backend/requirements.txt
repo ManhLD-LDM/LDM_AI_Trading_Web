@@ -7,4 +7,4 @@ python-dotenv
 websockets
 httpx
 pydantic
-google-generativeai
+google-genai

@@ -21,7 +21,8 @@ export default function Sidebar() {
 
   useEffect(() => {
     // Connect to backend WebSocket
-    const ws = new WebSocket('ws://127.0.0.1:8000/ws');
+    const host = window.location.hostname;
+    const ws = new WebSocket(`ws://${host}:8000/ws`);
     
     ws.onmessage = (event) => {
       try {
@@ -110,7 +111,7 @@ export default function Sidebar() {
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-slate-500">Backend</span>
-            <span className="text-emerald-400">ws://localhost:8000</span>
+            <span className="text-emerald-400">Port 8000 (Active)</span>
           </div>
         </div>
       </div>

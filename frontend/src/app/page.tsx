@@ -90,8 +90,8 @@ export default function Home() {
           <>
             <div className="flex-1 flex flex-col min-w-0 h-full relative">
               <header className="h-16 border-b border-white/5 glass-panel flex items-center px-6 shrink-0 z-10 justify-between">
-                <h1 className="text-lg font-medium tracking-wide text-slate-100">
-                  Live Trading Dashboard
+                <h1 className="text-xl md:text-2xl font-bold text-gray-100 flex items-center">
+                  Dashboard
                 </h1>
                 <div className="flex items-center gap-2 text-xs font-medium text-slate-400 bg-white/5 px-3 py-1.5 rounded-full border border-white/10">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_8px_rgba(251,191,36,0.8)]"></span>

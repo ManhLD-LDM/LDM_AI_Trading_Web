@@ -58,8 +58,10 @@ export default function ChartComponent() {
   const activeToolRef = useRef<string | null>(null);
   const pendingAnchorsRef = useRef<Anchor[]>([]);
   const requiredAnchorsRef = useRef<number>(2);
+  const previewDrawingIdRef = useRef<string | null>(null);
+  const saveDrawingsRef = useRef<(() => void) | null>(null);
 
-  const { pair, interval, signals, indicators, token } = useTradingStore();
+  const { pair, interval, signals, indicators, token } = useTradingStore((state) => state);
 
   const fetchKlines = async (endTime?: number) => {
     try {
@@ -67,7 +69,7 @@ export default function ChartComponent() {
       const res = await fetch(url);
       const data = await res.json();
       
-      return data.map((d: any) => ({
+      const formattedData = data.map((d: any) => ({
         time: (d[0] / 1000) as UTCTimestamp,
         open: parseFloat(d[1]),
         high: parseFloat(d[2]),
@@ -75,6 +77,25 @@ export default function ChartComponent() {
         close: parseFloat(d[4]),
         volume: parseFloat(d[5]),
       }));
+
+      if (!endTime && formattedData.length > 0) {
+        const value = parseInt(interval);
+        const unit = interval.slice(-1);
+        let intervalSeconds = 60;
+        if (unit === 'm') intervalSeconds = value * 60;
+        else if (unit === 'h') intervalSeconds = value * 3600;
+        else if (unit === 'd') intervalSeconds = value * 86400;
+        else if (unit === 'w') intervalSeconds = value * 604800;
+        else if (unit === 'M') intervalSeconds = value * 2592000;
+
+        const lastTime = formattedData[formattedData.length - 1].time;
+        const futureData = [];
+        for (let i = 1; i <= 150; i++) {
+          futureData.push({ time: (lastTime + i * intervalSeconds) as UTCTimestamp });
+        }
+        return [...formattedData, ...futureData];
+      }
+      return formattedData;
     } catch (err) {
       console.error("Failed to fetch klines", err);
       return [];
@@ -133,11 +154,11 @@ export default function ChartComponent() {
       if (token) {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(() => {
-          if (!drawingManagerRef.current) return;
+          if (!drawingManagerRef.current || previewDrawingIdRef.current) return;
           const drawingsJson = manager.exportDrawings();
           const host = window.location.hostname;
           const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
-          fetch(`${API_URL}/api/drawings/${pair}`, {
+          fetch(`${API_URL}/api/drawings/${pair}?interval=${interval}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -148,6 +169,7 @@ export default function ChartComponent() {
         }, 2000);
       }
     };
+    saveDrawingsRef.current = saveDrawings;
 
     manager.on('drawing:added', saveDrawings);
     manager.on('drawing:updated', saveDrawings);
@@ -156,8 +178,6 @@ export default function ChartComponent() {
 
     // =========================================================
     // CUSTOM INTERACTIVE DRAWING CREATION VIA subscribeClick
-    // The library's setActiveTool() API doesn't implement drawing
-    // creation internally, so we handle it here manually.
     // =========================================================
     const handleChartClick = (param: any) => {
       const toolType = activeToolRef.current;
@@ -166,44 +186,161 @@ export default function ChartComponent() {
       const price = candlestickSeries.coordinateToPrice(param.point.y);
       if (price === null) return;
 
+      const required = requiredAnchorsRef.current;
+      const entry = registry.get(toolType);
+      if (!entry) return;
+
+      if (required === 1) {
+        // For 1-anchor tools (like horizontal line), create and finish immediately
+        const anchor: Anchor = { time: param.time, price };
+        const drawing = entry.factory(genDrawingId(toolType), [anchor], {}, {});
+        if (drawing && drawingManagerRef.current) {
+          drawingManagerRef.current.addDrawing(drawing);
+          saveDrawingsRef.current?.();
+        }
+        activeToolRef.current = null;
+        setActiveTool(null);
+        chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true } });
+        return;
+      }
+
+      // For multi-anchor tools
       const anchor: Anchor = { time: param.time, price };
       const newAnchors = [...pendingAnchorsRef.current, anchor];
       pendingAnchorsRef.current = newAnchors;
       setPendingClickCount(newAnchors.length);
 
-      const required = requiredAnchorsRef.current;
-
-      if (newAnchors.length >= required) {
-        // All anchors collected — create the drawing
-        const entry = registry.get(toolType);
-        if (entry && drawingManagerRef.current) {
-          const drawing = entry.factory(
-            genDrawingId(toolType),
-            newAnchors,
-            {}, // default style
-            {}  // default options
-          );
+      if (newAnchors.length === 1) {
+        // First click: Create a preview drawing with duplicated anchors
+        const previewAnchors = [anchor, anchor];
+        const drawing = entry.factory(genDrawingId(toolType), previewAnchors, {}, {});
+        if (drawing && drawingManagerRef.current) {
+          previewDrawingIdRef.current = drawing.id;
+          drawingManagerRef.current.addDrawing(drawing); // This renders the preview
+        }
+      } else if (newAnchors.length >= required) {
+        // Final click: finalize the preview drawing
+        if (previewDrawingIdRef.current && drawingManagerRef.current) {
+          const drawing = drawingManagerRef.current.getDrawing(previewDrawingIdRef.current);
           if (drawing) {
-            drawingManagerRef.current.addDrawing(drawing);
+            drawing.updateAnchor(required - 1, anchor);
           }
         }
-        // Reset FSM — return to select mode
+        
+        // Reset FSM
+        previewDrawingIdRef.current = null;
         pendingAnchorsRef.current = [];
         setPendingClickCount(0);
         activeToolRef.current = null;
         setActiveTool(null);
-        // Re-enable chart scroll
-        chart.applyOptions({
-          handleScroll: {
-            pressedMouseMove: true,
-            horzTouchDrag: true,
-            vertTouchDrag: true,
-          }
-        });
+        chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true } });
+        saveDrawingsRef.current?.();
       }
     };
 
     chart.subscribeClick(handleChartClick);
+
+    // =========================================================
+    // HOVER PREVIEW FOR DRAWINGS
+    // =========================================================
+    let rafId: number | null = null;
+    const handleCrosshairMove = (param: any) => {
+      if (!activeToolRef.current || !previewDrawingIdRef.current || !param.point || !param.time) return;
+      const price = candlestickSeries.coordinateToPrice(param.point.y);
+      if (price === null || !drawingManagerRef.current) return;
+
+      if (rafId !== null) cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        if (drawingManagerRef.current && previewDrawingIdRef.current) {
+          const drawing = drawingManagerRef.current.getDrawing(previewDrawingIdRef.current);
+          if (drawing) {
+            const required = requiredAnchorsRef.current;
+            drawing.updateAnchor(required - 1, { time: param.time, price });
+          }
+        }
+        rafId = null;
+      });
+    };
+    chart.subscribeCrosshairMove(handleCrosshairMove);
+
+    // =========================================================
+    // FIX PANNING WHEN DRAGGING DRAWING ANCHORS
+    // =========================================================
+    const handleContainerMouseDown = (e: MouseEvent) => {
+      if (!drawingManagerRef.current || !chartContainerRef.current) return;
+      const rect = chartContainerRef.current.getBoundingClientRect();
+      const pixelPoint = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+      
+      // If we hit a drawing anchor, disable chart scrolling so lightweight-charts doesn't pan
+      const hitAnchor = drawingManagerRef.current.hitTestAnchor(pixelPoint);
+      if (hitAnchor) {
+        chart.applyOptions({ handleScroll: { pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false } });
+        
+        // Re-enable scroll when mouse is released
+        const handleMouseUp = () => {
+          chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true } });
+          window.removeEventListener('mouseup', handleMouseUp);
+        };
+        window.addEventListener('mouseup', handleMouseUp);
+      } else {
+        // Hit test body
+        const hitBody = drawingManagerRef.current.hitTest(pixelPoint);
+        if (hitBody && hitBody.id) {
+          const drawing = drawingManagerRef.current.getDrawing(hitBody.id);
+          if (drawing) {
+            chart.applyOptions({ handleScroll: { pressedMouseMove: false, horzTouchDrag: false, vertTouchDrag: false } });
+            
+            const initialMouseX = pixelPoint.x;
+            const initialMouseY = pixelPoint.y;
+            // clone anchors
+            const initialAnchors = JSON.parse(JSON.stringify(drawing.anchors));
+            
+            const handleBodyMouseMove = (moveEvent: MouseEvent) => {
+              if (!chartContainerRef.current) return;
+              const currentPoint = { x: moveEvent.clientX - rect.left, y: moveEvent.clientY - rect.top };
+              const dx = currentPoint.x - initialMouseX;
+              const dy = currentPoint.y - initialMouseY;
+              
+              const newAnchors = initialAnchors.map((anchor: any) => {
+                const origX = chart.timeScale().timeToCoordinate(anchor.time);
+                const origY = candlestickSeries.priceToCoordinate(anchor.price);
+                if (origX !== null && origY !== null) {
+                   const newTime = chart.timeScale().coordinateToTime(origX + dx);
+                   const newPrice = candlestickSeries.coordinateToPrice(origY + dy);
+                   if (newTime !== null && newPrice !== null) {
+                     return { time: newTime, price: newPrice };
+                   }
+                }
+                return anchor;
+              });
+              
+              newAnchors.forEach((a: any, i: number) => {
+                 drawing.updateAnchor(i, a);
+              });
+            };
+            
+            const handleBodyMouseUp = () => {
+              chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: true } });
+              window.removeEventListener('mousemove', handleBodyMouseMove);
+              window.removeEventListener('mouseup', handleBodyMouseUp);
+              saveDrawingsRef.current?.();
+            };
+            
+            window.addEventListener('mousemove', handleBodyMouseMove);
+            window.addEventListener('mouseup', handleBodyMouseUp);
+          }
+        }
+      }
+    };
+    const containerEl = chartContainerRef.current;
+    containerEl?.addEventListener('mousedown', handleContainerMouseDown);
+
+    const handleResize = () => {
+      if (chartContainerRef.current) {
+        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
+      }
+    };
+    window.addEventListener('resize', handleResize);
 
     // Load initial data
     isInitialLoadRef.current = true;
@@ -212,7 +349,7 @@ export default function ChartComponent() {
     if (token) {
       const host = window.location.hostname;
       const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
-      fetch(`${API_URL}/api/drawings/${pair}`, {
+      fetch(`${API_URL}/api/drawings/${pair}?interval=${interval}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())
@@ -269,16 +406,19 @@ export default function ChartComponent() {
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
 
     return () => {
+      containerEl?.removeEventListener('mousedown', handleContainerMouseDown);
+      window.removeEventListener('resize', handleResize);
       isMounted = false;
       chart.unsubscribeClick(handleChartClick);
+      chart.unsubscribeCrosshairMove(handleCrosshairMove);
       if (drawingManagerRef.current) {
         drawingManagerRef.current.detach();
       }
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
       chart.remove();
-      clearTimeout(saveTimeout);
+      // saveTimeout is handled via ref if needed, or we just let it fire since we have no access to it directly
     };
-  }, [pair, interval]); // Re-create chart on pair/interval change
+  }, [pair, interval, token]); // re-run effect when pair or interval changes
 
   // 2. Handle WebSocket
   useEffect(() => {

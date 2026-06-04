@@ -38,14 +38,14 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
 
 class TechnicalAgent:
     async def analyze(self, kronos_prediction: dict, recent_candles: list, interval: str) -> str:
-        sys_prompt = "Bạn là Technical Analyst. Hãy phân tích dự đoán từ model lượng tử (Kronos) và dữ liệu nến gần nhất."
+        sys_prompt = "Bạn là Technical Analyst. Hãy phân tích dự đoán từ model lượng tử (Kronos) và dữ liệu nến gần nhất. PHẦN PHÂN TÍCH PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
         candles_str = "\n".join([f"Open: {c[1]}, High: {c[2]}, Low: {c[3]}, Close: {c[4]}, Vol: {c[5]}" for c in recent_candles])
         user_prompt = f"Khung thời gian (Timeframe): {interval}\nKronos dự báo trend: {kronos_prediction.get('trend')} với độ tin cậy {kronos_prediction.get('confidence')}%. \n{len(recent_candles)} nến gần nhất:\n{candles_str}"
         return await call_agent(sys_prompt, user_prompt)
 
 class SentimentAgent:
     async def analyze(self, symbol: str) -> str:
-        sys_prompt = "Bạn là Sentiment Analyst. Dựa vào tin tức tiêu đề, hãy đánh giá tâm lý thị trường (Bullish, Bearish hay Neutral)."
+        sys_prompt = "Bạn là Sentiment Analyst. Dựa vào tin tức tiêu đề, hãy đánh giá tâm lý thị trường (Bullish, Bearish hay Neutral). PHẦN ĐÁNH GIÁ PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
         import random
         scenarios = [
             f"Lượng người dùng {symbol} tăng mạnh, các quỹ ETF tiếp tục mua vào.",
@@ -60,7 +60,7 @@ class SentimentAgent:
 
 class TraderAgent:
     async def decide(self, tech_analysis: str, sentiment_analysis: str, interval: str) -> dict:
-        sys_prompt = f"Bạn là Master Trader giao dịch trên khung thời gian {interval}. Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. Khung thời gian nhỏ (1m, 5m, 15m) thì ưu tiên lướt sóng, khung thời gian lớn (1h, 4h, 1d) thì đánh theo xu hướng. Trả về ĐÚNG MỘT object JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100). KHÔNG TRẢ VỀ BẤT KỲ VĂN BẢN NÀO KHÁC NGOÀI JSON."
+        sys_prompt = f"Bạn là Master Trader giao dịch trên khung thời gian {interval}. Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. Khung thời gian nhỏ (1m, 5m, 15m) thì ưu tiên lướt sóng, khung thời gian lớn (1h, 4h, 1d) thì đánh theo xu hướng. Trả về ĐÚNG MỘT object JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100). KHÔNG TRẢ VỀ BẤT KỲ VĂN BẢN NÀO KHÁC NGOÀI JSON. LƯU Ý: Trường 'reason' TRONG JSON PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
         user_prompt = f"Khung thời gian giao dịch: {interval}\n\nKỹ thuật:\n{tech_analysis}\n\nTâm lý:\n{sentiment_analysis}"
         # Lỗi 500 xuất hiện do Gemma không hỗ trợ response_mime_type="application/json"
         response_text = await call_agent(sys_prompt, user_prompt)

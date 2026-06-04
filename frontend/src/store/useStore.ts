@@ -49,15 +49,39 @@ const defaultIndicators: IndicatorConfig[] = [
   { instanceId: 'macd_1', indicatorId: 'macd', params: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, active: false },
 ];
 
-export const useTradingStore = create<TradingStore>((set) => ({
-  user: typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null,
-  token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
-  pair: 'BTCUSDT',
-  interval: '1m',
-  signals: [],
-  indicators: defaultIndicators,
-  setPair: (pair) => set({ pair }),
-  setInterval: (interval) => set({ interval }),
+export const useTradingStore = create<TradingStore>()((set, get) => {
+  const syncPreferences = () => {
+    const state = get();
+    if (state.token && typeof window !== 'undefined') {
+      const host = window.location.hostname;
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
+      
+      const preferences = {
+        pair: state.pair,
+        interval: state.interval,
+        indicators: state.indicators
+      };
+      
+      fetch(`${API_URL}/api/user/preferences`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${state.token}`
+        },
+        body: JSON.stringify(preferences)
+      }).catch(() => {});
+    }
+  };
+
+  return {
+    user: typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null,
+    token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
+    pair: 'BTCUSDT',
+    interval: '1m',
+    signals: [],
+    indicators: defaultIndicators,
+    setPair: (pair) => { set({ pair }); syncPreferences(); },
+    setInterval: (interval) => { set({ interval }); syncPreferences(); },
   addSignal: (signal) => set((state) => ({ signals: [...state.signals, signal] })),
   clearSignals: () => set({ signals: [] }),
   toggleIndicator: (instanceId) => set((state) => ({
@@ -79,11 +103,14 @@ export const useTradingStore = create<TradingStore>((set) => ({
   removeIndicator: (instanceId) => set((state) => ({
     indicators: state.indicators.filter(ind => ind.instanceId !== instanceId)
   })),
-  updateIndicatorParams: (instanceId, params) => set((state) => ({
-    indicators: state.indicators.map(ind =>
-      ind.instanceId === instanceId ? { ...ind, params: { ...ind.params, ...params } } : ind
-    )
-  })),
+    updateIndicatorParams: (instanceId, params) => {
+      set((state) => ({
+        indicators: state.indicators.map(ind =>
+          ind.instanceId === instanceId ? { ...ind, params: { ...ind.params, ...params } } : ind
+        )
+      }));
+      syncPreferences();
+    },
   login: (user, token) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('user', JSON.stringify(user));
@@ -100,11 +127,12 @@ export const useTradingStore = create<TradingStore>((set) => ({
     
     set(updates);
   },
-  logout: () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('user');
-      localStorage.removeItem('token');
-    }
-    set({ user: null, token: null });
-  },
-}));
+    logout: () => {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('user');
+        localStorage.removeItem('token');
+      }
+      set({ user: null, token: null });
+    },
+  };
+});

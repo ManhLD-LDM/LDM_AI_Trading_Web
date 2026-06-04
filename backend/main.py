@@ -174,22 +174,22 @@ class DrawingData(BaseModel):
     data: list
 
 @app.get("/api/drawings/{symbol}")
-async def get_drawings(symbol: str, current_user_email: str = Depends(get_current_user)):
+async def get_drawings(symbol: str, interval: str = "1m", current_user_email: str = Depends(get_current_user)):
     if not db.client:
         return {"data": []}
     collection = get_database()["drawings"]
-    doc = await collection.find_one({"email": current_user_email, "symbol": symbol})
+    doc = await collection.find_one({"email": current_user_email, "symbol": symbol, "interval": interval})
     if doc and "data" in doc:
         return {"data": doc["data"]}
     return {"data": []}
 
 @app.post("/api/drawings/{symbol}")
-async def save_drawings(symbol: str, drawing: DrawingData, current_user_email: str = Depends(get_current_user)):
+async def save_drawings(symbol: str, drawing: DrawingData, interval: str = "1m", current_user_email: str = Depends(get_current_user)):
     if not db.client:
         return {"status": "success", "mock": True}
     collection = get_database()["drawings"]
     await collection.update_one(
-        {"email": current_user_email, "symbol": symbol},
+        {"email": current_user_email, "symbol": symbol, "interval": interval},
         {"$set": {"data": drawing.data}},
         upsert=True
     )

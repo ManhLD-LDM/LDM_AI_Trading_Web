@@ -39,7 +39,7 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
 class TechnicalAgent:
     async def analyze(self, kronos_prediction: dict, recent_candles: list, interval: str) -> str:
         sys_prompt = "Bạn là Technical Analyst. Hãy phân tích dự đoán từ model lượng tử (Kronos) và dữ liệu nến gần nhất."
-        candles_str = "\n".join([f"Open: {c[0]}, High: {c[1]}, Low: {c[2]}, Close: {c[3]}, Vol: {c[4]}" for c in recent_candles])
+        candles_str = "\n".join([f"Open: {c[1]}, High: {c[2]}, Low: {c[3]}, Close: {c[4]}, Vol: {c[5]}" for c in recent_candles])
         user_prompt = f"Khung thời gian (Timeframe): {interval}\nKronos dự báo trend: {kronos_prediction.get('trend')} với độ tin cậy {kronos_prediction.get('confidence')}%. \n{len(recent_candles)} nến gần nhất:\n{candles_str}"
         return await call_agent(sys_prompt, user_prompt)
 

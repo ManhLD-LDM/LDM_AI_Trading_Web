@@ -232,7 +232,7 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
 
         # 3. Agents analysis (concurrently)
         recent_candles = history_data[-50:] if len(history_data) >= 50 else history_data
-        current_price = history_data[-1][3] # Close price of the last candle
+        current_price = history_data[-1][4] # Close price of the last candle
         
         tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, recent_candles, interval))
         sent_task = asyncio.create_task(sentiment_agent.analyze(symbol))

@@ -31,10 +31,11 @@ async def get_historical_klines(symbol: str = "BTCUSDT", interval: str = "1m", l
         #   ]
         # ]
         
-        # Chỉ lấy Open, High, Low, Close, Volume
+        # Chỉ lấy Timestamp, Open, High, Low, Close, Volume
         ohlcv = []
         for d in data:
             ohlcv.append([
+                float(d[0]), # Open time
                 float(d[1]), # Open
                 float(d[2]), # High
                 float(d[3]), # Low

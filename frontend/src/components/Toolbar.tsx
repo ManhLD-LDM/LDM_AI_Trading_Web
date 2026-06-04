@@ -130,6 +130,11 @@ export default function Toolbar() {
                   {p}
                 </button>
               ))}
+              {filteredPairs.length === 50 && (
+                <div className="p-4 text-xs text-slate-500 text-center italic">
+                  Hiển thị 50 cặp đầu tiên. Hãy tìm kiếm để xem thêm...
+                </div>
+              )}
               {filteredPairs.length === 0 && (
                 <div className="p-4 text-xs text-slate-500 text-center">No pairs found</div>
               )}

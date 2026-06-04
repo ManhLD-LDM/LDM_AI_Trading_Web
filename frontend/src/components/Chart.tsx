@@ -115,17 +115,23 @@ export default function ChartComponent() {
       setActiveTool(event.tool);
     });
 
+    let saveTimeout: NodeJS.Timeout;
     const saveDrawings = () => {
       if (token) {
-        const drawingsJson = manager.exportDrawings();
-        fetch(`http://localhost:8000/api/drawings/${pair}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ data: drawingsJson })
-        }).catch(console.error);
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+          if (!drawingManagerRef.current) return;
+          const drawingsJson = manager.exportDrawings();
+          const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+          fetch(`${API_URL}/api/drawings/${pair}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ data: drawingsJson })
+          }).catch(console.error);
+        }, 2000);
       }
     };
 
@@ -140,7 +146,8 @@ export default function ChartComponent() {
     
     // Fetch drawings from DB
     if (token) {
-      fetch(`http://localhost:8000/api/drawings/${pair}`, {
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      fetch(`${API_URL}/api/drawings/${pair}`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
@@ -209,6 +216,7 @@ export default function ChartComponent() {
       }
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
       chart.remove();
+      clearTimeout(saveTimeout);
     };
   }, [pair, interval]); // Re-create chart on pair/interval change
 
@@ -396,9 +404,9 @@ export default function ChartComponent() {
   }, []);
 
   return (
-    <div className="relative w-full h-full flex items-center justify-center bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group">
+    <div className="relative w-full h-full flex bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group">
       {isLoading && (
-        <div className="absolute top-4 right-4 bg-slate-800/80 px-3 py-1.5 rounded text-xs text-slate-300 font-medium z-10">
+        <div className="absolute top-4 right-4 bg-slate-800/80 px-3 py-1.5 rounded text-xs text-slate-300 font-medium z-20">
           Loading...
         </div>
       )}
@@ -410,7 +418,7 @@ export default function ChartComponent() {
         onDeleteSelected={handleDeleteSelected}
       />
 
-      <div ref={chartContainerRef} className="w-full h-full" />
+      <div ref={chartContainerRef} className="flex-1 h-full min-w-0 relative" />
     </div>
   );
 }

@@ -62,7 +62,7 @@ export default function Toolbar() {
   const filteredPairs = pairs.filter(p => p.toLowerCase().includes(searchPair.toLowerCase())).slice(0, 50); // limit to 50 for perf
 
   return (
-    <div className="flex items-center gap-4 bg-slate-800/80 rounded-lg p-2 mb-4 border border-slate-700 shadow-sm relative z-50">
+    <div className="flex items-center gap-4 bg-slate-800/80 rounded-lg p-2 mb-4 border border-slate-700 shadow-sm relative z-40">
       
       {/* Pair Selector */}
       <div className="relative" ref={pairRef}>

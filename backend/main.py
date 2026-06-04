@@ -4,10 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import json
 import time
+import os
+from datetime import datetime, timezone
 from pydantic import BaseModel
 from contextlib import asynccontextmanager
 
-from database import connect_to_mongo, close_mongo_connection, db
+from database import connect_to_mongo, close_mongo_connection, db, get_database
 from binance_api import get_historical_klines
 from kronos_onnx import KronosInference
 from agents import TechnicalAgent, SentimentAgent, TraderAgent
@@ -24,11 +26,13 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="LDM AI Trading Backend", lifespan=lifespan)
 
+origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=origins, 
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
 )
 
@@ -66,7 +70,7 @@ async def health_check():
 
 @app.post("/api/auth/register", response_model=Token)
 async def register(user: UserCreate):
-    collection = db.client.get_database("ldm_trading").get_collection("users")
+    collection = get_database()["users"]
     existing_user = await collection.find_one({"email": user.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -87,7 +91,7 @@ async def register(user: UserCreate):
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    collection = db.client.get_database("ldm_trading").get_collection("users")
+    collection = get_database()["users"]
     user = await collection.find_one({"email": form_data.username})
     if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(
@@ -104,7 +108,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.get("/api/user/me")
 async def read_users_me(current_user_email: str = Depends(get_current_user)):
-    collection = db.client.get_database("ldm_trading").get_collection("users")
+    collection = get_database()["users"]
     user = await collection.find_one({"email": current_user_email})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -112,7 +116,7 @@ async def read_users_me(current_user_email: str = Depends(get_current_user)):
 
 @app.put("/api/user/preferences")
 async def update_preferences(preferences: dict, current_user_email: str = Depends(get_current_user)):
-    collection = db.client.get_database("ldm_trading").get_collection("users")
+    collection = get_database()["users"]
     await collection.update_one(
         {"email": current_user_email},
         {"$set": {"preferences": preferences}}
@@ -141,7 +145,7 @@ async def receive_webhook_signal(signal: WebhookSignal):
     
     # Store in DB
     if db.client:
-        collection = db.client.get_database("ldm_trading_db")["trade_signals"]
+        collection = get_database()["trade_signals"]
         await collection.insert_one({
             "bot_name": signal.bot_name,
             "symbol": signal.symbol,
@@ -149,7 +153,8 @@ async def receive_webhook_signal(signal: WebhookSignal):
             "confidence": signal.confidence,
             "price": signal.price,
             "reason": signal.reason,
-            "source": "webhook"
+            "source": "webhook",
+            "createdAt": datetime.now(timezone.utc)
         })
     return {"status": "success", "message": "Signal processed"}
 
@@ -158,7 +163,7 @@ class DrawingData(BaseModel):
 
 @app.get("/api/drawings/{symbol}")
 async def get_drawings(symbol: str, current_user_email: str = Depends(get_current_user)):
-    collection = db.client.get_database("ldm_trading").get_collection("drawings")
+    collection = get_database()["drawings"]
     doc = await collection.find_one({"email": current_user_email, "symbol": symbol})
     if doc and "data" in doc:
         return {"data": doc["data"]}
@@ -166,7 +171,7 @@ async def get_drawings(symbol: str, current_user_email: str = Depends(get_curren
 
 @app.post("/api/drawings/{symbol}")
 async def save_drawings(symbol: str, drawing: DrawingData, current_user_email: str = Depends(get_current_user)):
-    collection = db.client.get_database("ldm_trading").get_collection("drawings")
+    collection = get_database()["drawings"]
     await collection.update_one(
         {"email": current_user_email, "symbol": symbol},
         {"$set": {"data": drawing.data}},
@@ -183,57 +188,64 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
+async def run_analysis_for_symbol(symbol: str):
+    try:
+        # 1. Fetch market data
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Fetching latest market data..."}))
+        history_data = await get_historical_klines(symbol=symbol, interval="1m", limit=512)
+        
+        # 2. Run Kronos
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running Kronos Inference..."}))
+        kronos_prediction = kronos_model.predict(history_data)
+        await manager.broadcast(json.dumps({
+            "type": "ai_log", 
+            "agent_name": "Kronos", 
+            "thought": f"[{symbol}] Trend: {kronos_prediction.get('trend')} (Confidence: {kronos_prediction.get('confidence')}%)"
+        }))
+
+        # 3. Agents analysis (concurrently)
+        current_price = history_data[-1][3] # Close price of the last candle
+        
+        tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, current_price))
+        sent_task = asyncio.create_task(sentiment_agent.analyze(symbol))
+        
+        tech_analysis, sent_analysis = await asyncio.gather(tech_task, sent_task)
+        
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Tech Agent", "thought": f"[{symbol}] Technical analysis completed."}))
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Sentiment Agent", "thought": f"[{symbol}] Sentiment analysis completed."}))
+
+        # 4. Final Decision
+        decision = await trader_agent.decide(tech_analysis, sent_analysis)
+        
+        await manager.broadcast(json.dumps({
+            "type": "ai_log", 
+            "agent_name": "Trader Agent", 
+            "thought": f"[{symbol}] Decision: {decision.get('action')}. {decision.get('reason')}",
+            "action": decision.get('action'),
+            "price": float(current_price),
+            "timestamp": int(history_data[-1][0] / 1000)
+        }))
+        
+        # Store in DB (if DB is connected)
+        if db.client:
+            collection = get_database()["trade_signals"]
+            await collection.insert_one({
+                "symbol": symbol,
+                "action": decision.get('action'),
+                "confidence": decision.get('confidence'),
+                "price": float(current_price),
+                "reason": decision.get('reason'),
+                "createdAt": datetime.now(timezone.utc)
+            })
+    except Exception as e:
+        print(f"[{symbol}] Analysis error: {e}")
+
 async def ai_trading_loop():
-    symbol = "BTCUSDT"
+    symbols = ["BTCUSDT", "ETHUSDT"]
     while True:
         try:
-            # 1. Fetch market data
-            await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": "Fetching latest market data..."}))
-            history_data = await get_historical_klines(symbol=symbol, interval="1m", limit=512)
-            
-            # 2. Run Kronos
-            await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": "Running Kronos Inference..."}))
-            kronos_prediction = kronos_model.predict(history_data)
-            await manager.broadcast(json.dumps({
-                "type": "ai_log", 
-                "agent_name": "Kronos", 
-                "thought": f"Trend: {kronos_prediction.get('trend')} (Confidence: {kronos_prediction.get('confidence')}%)"
-            }))
-
-            # 3. Agents analysis (concurrently)
-            current_price = history_data[-1][3] # Close price of the last candle
-            
-            tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, current_price))
-            sent_task = asyncio.create_task(sentiment_agent.analyze(symbol))
-            
-            tech_analysis, sent_analysis = await asyncio.gather(tech_task, sent_task)
-            
-            await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Tech Agent", "thought": "Technical analysis completed."}))
-            await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Sentiment Agent", "thought": "Sentiment analysis completed."}))
-
-            # 4. Final Decision
-            decision = await trader_agent.decide(tech_analysis, sent_analysis)
-            
-            await manager.broadcast(json.dumps({
-                "type": "ai_log", 
-                "agent_name": "Trader Agent", 
-                "thought": f"Decision: {decision['action']}. {decision['reason']}",
-                "action": decision['action'],
-                "price": float(current_price),
-                "timestamp": int(history_data[-1][0] / 1000)
-            }))
-            
-            # Store in DB (if DB is connected)
-            if db.client:
-                collection = db.client.get_database("ldm_trading_db")["trade_signals"]
-                await collection.insert_one({
-                    "symbol": symbol,
-                    "action": decision['action'],
-                    "confidence": decision['confidence'],
-                    "price": float(current_price),
-                    "reason": decision['reason']
-                })
-                
+            tasks = [run_analysis_for_symbol(sym) for sym in symbols]
+            await asyncio.gather(*tasks)
             # Wait for next cycle (e.g. 5 minutes)
             await asyncio.sleep(300)
             

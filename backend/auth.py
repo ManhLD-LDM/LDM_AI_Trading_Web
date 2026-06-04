@@ -8,7 +8,9 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "supersecretkey_ldm_trading_pro_max")
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY:
+    raise RuntimeError("Critical Error: JWT_SECRET_KEY environment variable is not set! Please set it in .env file.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 

@@ -29,7 +29,7 @@ const TOOLS = [
 
 export default function DrawingToolbar({ activeTool, onSelectTool, onClearAll, onDeleteSelected }: DrawingToolbarProps) {
   return (
-    <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col gap-1 bg-slate-900/90 border border-slate-700/80 rounded-lg p-1 shadow-2xl backdrop-blur-sm z-50">
+    <div className="flex flex-col gap-1 bg-slate-900 border-r border-slate-800 p-1 shrink-0 overflow-y-auto z-10 w-[42px] items-center">
       {TOOLS.map((tool, idx) => {
         const Icon = tool.icon;
         const isActive = activeTool === tool.id;

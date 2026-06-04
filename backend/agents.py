@@ -2,6 +2,7 @@ import os
 import google.generativeai as genai
 import httpx
 import asyncio
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -14,16 +15,18 @@ if GEMINI_API_KEY:
 # Sử dụng model flash miễn phí và nhanh
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-async def call_agent(system_prompt: str, user_prompt: str) -> str:
+async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: str = "text/plain") -> str:
     """Gọi Gemini API bất đồng bộ"""
     if not GEMINI_API_KEY:
         return "MOCK_RESPONSE: Missing Gemini API Key"
     
     try:
-        # Wrap the synchronous call in a thread
-        loop = asyncio.get_event_loop()
         prompt = f"{system_prompt}\n\nUSER INPUT:\n{user_prompt}"
-        response = await loop.run_in_executor(None, lambda: model.generate_content(prompt))
+        response = await asyncio.to_thread(
+            model.generate_content,
+            prompt,
+            generation_config={"response_mime_type": response_mime_type}
+        )
         return response.text
     except Exception as e:
         print(f"Agent error: {e}")
@@ -45,23 +48,24 @@ class SentimentAgent:
 
 class TraderAgent:
     async def decide(self, tech_analysis: str, sentiment_analysis: str) -> dict:
-        sys_prompt = "Bạn là Master Trader. Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. Trả về format JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100)."
+        sys_prompt = "Bạn là Master Trader. Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. Trả về ĐÚNG MỘT object JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100)."
         user_prompt = f"Kỹ thuật:\n{tech_analysis}\n\nTâm lý:\n{sentiment_analysis}"
-        response_text = await call_agent(sys_prompt, user_prompt)
+        response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="application/json")
         
-        # Trong thực tế, sẽ parse JSON từ response_text
-        # Đây là fallback đơn giản:
-        action = "HOLD"
-        if "BUY" in response_text.upper():
-            action = "BUY"
-        elif "SELL" in response_text.upper():
-            action = "SELL"
-            
-        return {
-            "action": action,
-            "reason": response_text[:200], # Truncate for safety
-            "confidence": 80
-        }
+        try:
+            decision = json.loads(response_text)
+            return {
+                "action": decision.get("action", "HOLD").upper(),
+                "reason": decision.get("reason", "No reason provided")[:200],
+                "confidence": int(decision.get("confidence", 80))
+            }
+        except Exception as e:
+            print(f"Failed to parse JSON from TraderAgent: {e}. Fallback to HOLD.")
+            return {
+                "action": "HOLD",
+                "reason": response_text[:200],
+                "confidence": 80
+            }
 
 async def send_discord_alert(webhook_url: str, message: str):
     if not webhook_url: return

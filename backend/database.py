@@ -1,4 +1,5 @@
 import os
+import pymongo
 from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
@@ -18,6 +19,14 @@ async def connect_to_mongo():
         # Verify connection
         await db.client.admin.command('ping')
         print("Connected to MongoDB!")
+        
+        # Setup TTL Index (30 days = 2592000 seconds)
+        database = db.client[DB_NAME]
+        await database["trade_signals"].create_index(
+            [("createdAt", pymongo.ASCENDING)], 
+            expireAfterSeconds=2592000
+        )
+        print("TTL Index verified for trade_signals.")
     except Exception as e:
         print(f"Could not connect to MongoDB: {e}")
 

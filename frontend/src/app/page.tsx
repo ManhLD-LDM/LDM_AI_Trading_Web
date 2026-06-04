@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ChartComponent from '@/components/Chart';
 import Sidebar from '@/components/Sidebar';
 import Toolbar from '@/components/Toolbar';
@@ -10,7 +10,12 @@ import { useTradingStore } from '@/store/useStore';
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'live' | 'backtest' | 'settings'>('live');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const { user, logout } = useTradingStore();
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const handleTabChange = (tab: 'live' | 'backtest' | 'settings') => {
     if ((tab === 'backtest' || tab === 'settings') && !user) {
@@ -53,22 +58,24 @@ export default function Home() {
         </button>
 
         <div className="mt-auto mb-4 flex flex-col gap-4">
-          {user ? (
-            <button 
-              onClick={logout}
-              className="p-3 rounded-xl transition-all text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 active:scale-95"
-              title="Sign Out"
-            >
-              <LogOut size={24} />
-            </button>
-          ) : (
-            <button 
-              onClick={() => setIsAuthModalOpen(true)}
-              className="p-3 rounded-xl transition-all text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 active:scale-95"
-              title="Sign In"
-            >
-              <User size={24} />
-            </button>
+          {mounted && (
+            user ? (
+              <button 
+                onClick={logout}
+                className="p-3 rounded-xl transition-all text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 active:scale-95"
+                title="Sign Out"
+              >
+                <LogOut size={24} />
+              </button>
+            ) : (
+              <button 
+                onClick={() => setIsAuthModalOpen(true)}
+                className="p-3 rounded-xl transition-all text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300 active:scale-95"
+                title="Sign In"
+              >
+                <User size={24} />
+              </button>
+            )
           )}
         </div>
       </div>
@@ -89,7 +96,7 @@ export default function Home() {
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
                   Binance WS Connected
                 </div>
-                {user && (
+                {mounted && user && (
                   <div className="ml-4 text-sm text-emerald-400 font-medium">
                     {user.email}
                   </div>

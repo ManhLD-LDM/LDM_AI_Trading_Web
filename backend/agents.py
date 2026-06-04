@@ -23,7 +23,7 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
         prompt = f"{system_prompt}\n\nUSER INPUT:\n{user_prompt}"
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model='gemini-1.5-flash',
+            model='gemini-3.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type=response_mime_type,

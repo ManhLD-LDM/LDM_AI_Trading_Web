@@ -162,7 +162,9 @@ export default function ChartComponent() {
           drawingManagerRef.current.importDrawings(data.data, drawingFactory);
         }
       })
-      .catch(console.error);
+      .catch(() => {
+        // Silently ignore fetch errors (e.g. VPN blocking port 8000 or CORS)
+      });
     }
 
     fetchKlines().then(data => {
@@ -387,6 +389,18 @@ export default function ChartComponent() {
     if (drawingManagerRef.current) {
       drawingManagerRef.current.setActiveTool(tool);
       setActiveTool(tool);
+      
+      // Disable scrolling when a tool is active to allow drawing
+      if (chartRef.current) {
+        const isDrawing = tool !== null;
+        chartRef.current.applyOptions({
+          handleScroll: {
+            pressedMouseMove: !isDrawing,
+            horzTouchDrag: !isDrawing,
+            vertTouchDrag: !isDrawing,
+          }
+        });
+      }
     }
   }, []);
 

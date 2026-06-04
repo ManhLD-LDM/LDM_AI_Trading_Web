@@ -76,6 +76,8 @@ async def health_check():
 
 @app.post("/api/auth/register", response_model=Token)
 async def register(user: UserCreate):
+    if not db.client:
+        raise HTTPException(status_code=503, detail="Database not available (Mock mode)")
     collection = get_database()["users"]
     existing_user = await collection.find_one({"email": user.email})
     if existing_user:
@@ -97,6 +99,8 @@ async def register(user: UserCreate):
 
 @app.post("/api/auth/login", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    if not db.client:
+        raise HTTPException(status_code=503, detail="Database not available (Mock mode)")
     collection = get_database()["users"]
     user = await collection.find_one({"email": form_data.username})
     if not user or not verify_password(form_data.password, user["hashed_password"]):
@@ -114,6 +118,8 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.get("/api/user/me")
 async def read_users_me(current_user_email: str = Depends(get_current_user)):
+    if not db.client:
+        return {"email": current_user_email, "preferences": {}}
     collection = get_database()["users"]
     user = await collection.find_one({"email": current_user_email})
     if not user:
@@ -122,6 +128,8 @@ async def read_users_me(current_user_email: str = Depends(get_current_user)):
 
 @app.put("/api/user/preferences")
 async def update_preferences(preferences: dict, current_user_email: str = Depends(get_current_user)):
+    if not db.client:
+        return {"status": "success", "preferences": preferences, "mock": True}
     collection = get_database()["users"]
     await collection.update_one(
         {"email": current_user_email},
@@ -169,6 +177,8 @@ class DrawingData(BaseModel):
 
 @app.get("/api/drawings/{symbol}")
 async def get_drawings(symbol: str, current_user_email: str = Depends(get_current_user)):
+    if not db.client:
+        return {"data": []}
     collection = get_database()["drawings"]
     doc = await collection.find_one({"email": current_user_email, "symbol": symbol})
     if doc and "data" in doc:
@@ -177,6 +187,8 @@ async def get_drawings(symbol: str, current_user_email: str = Depends(get_curren
 
 @app.post("/api/drawings/{symbol}")
 async def save_drawings(symbol: str, drawing: DrawingData, current_user_email: str = Depends(get_current_user)):
+    if not db.client:
+        return {"status": "success", "mock": True}
     collection = get_database()["drawings"]
     await collection.update_one(
         {"email": current_user_email, "symbol": symbol},

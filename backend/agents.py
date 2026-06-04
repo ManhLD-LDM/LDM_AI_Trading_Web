@@ -23,7 +23,7 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
         prompt = f"{system_prompt}\n\nUSER INPUT:\n{user_prompt}"
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model='gemini-3.5-flash',
+            model='gemini-2.5-flash-lite',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type=response_mime_type,
@@ -32,6 +32,8 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
         return response.text
     except Exception as e:
         print(f"Agent error: {e}")
+        if response_mime_type == "application/json":
+            return json.dumps({"action": "HOLD", "reason": f"API Quota/Error: {str(e)[:100]}", "confidence": 50})
         return f"ERROR: {str(e)}"
 
 class TechnicalAgent:
@@ -58,14 +60,14 @@ class TraderAgent:
             decision = json.loads(response_text)
             return {
                 "action": decision.get("action", "HOLD").upper(),
-                "reason": decision.get("reason", "No reason provided")[:200],
+                "reason": decision.get("reason", "No reason provided"),
                 "confidence": int(decision.get("confidence", 80))
             }
         except Exception as e:
             print(f"Failed to parse JSON from TraderAgent: {e}. Fallback to HOLD.")
             return {
                 "action": "HOLD",
-                "reason": response_text[:200],
+                "reason": response_text,
                 "confidence": 80
             }
 

@@ -19,12 +19,12 @@ interface DrawingToolbarProps {
 
 const TOOLS = [
   { id: null, icon: MousePointer2, tooltip: 'Select / Move' },
-  { id: 'TrendLine', icon: Minus, tooltip: 'Trend Line', rotate: -45 },
-  { id: 'HorizontalLine', icon: Minus, tooltip: 'Horizontal Line' },
-  { id: 'FibRetracement', icon: Activity, tooltip: 'Fibonacci Retracement' },
-  { id: 'Rectangle', icon: Square, tooltip: 'Rectangle' },
-  { id: 'TextAnnotation', icon: Type, tooltip: 'Text' },
-  { id: 'Brush', icon: Paintbrush, tooltip: 'Brush' },
+  { id: 'trend-line', icon: Minus, tooltip: 'Trend Line', rotate: -45 },
+  { id: 'horizontal-line', icon: Minus, tooltip: 'Horizontal Line' },
+  { id: 'fib-retracement', icon: Activity, tooltip: 'Fibonacci Retracement' },
+  { id: 'rectangle', icon: Square, tooltip: 'Rectangle' },
+  { id: 'text-annotation', icon: Type, tooltip: 'Text' },
+  { id: 'brush', icon: Paintbrush, tooltip: 'Brush' },
 ];
 
 export default function DrawingToolbar({ activeTool, onSelectTool, onClearAll, onDeleteSelected }: DrawingToolbarProps) {

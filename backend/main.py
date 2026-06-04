@@ -21,9 +21,7 @@ from auth import (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
-    ai_task = asyncio.create_task(ai_trading_loop())
     yield
-    ai_task.cancel()
     await close_mongo_connection()
 
 app = FastAPI(title="LDM AI Trading Backend", lifespan=lifespan)
@@ -32,9 +30,9 @@ origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, 
+    allow_origin_regex=".*",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -206,11 +204,21 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-async def run_analysis_for_symbol(symbol: str):
+class AnalysisRequest(BaseModel):
+    symbol: str
+    interval: str
+
+@app.post("/api/analysis/run")
+async def trigger_analysis(req: AnalysisRequest):
+    # Đẩy tác vụ chạy nền (async) để không block giao diện
+    asyncio.create_task(run_analysis_for_symbol(req.symbol, req.interval))
+    return {"status": "success", "message": f"Started analysis for {req.symbol} on {req.interval} timeframe."}
+
+async def run_analysis_for_symbol(symbol: str, interval: str):
     try:
         # 1. Fetch market data
-        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Fetching latest market data..."}))
-        history_data = await get_historical_klines(symbol=symbol, interval="1m", limit=512)
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Fetching latest market data for {interval}..."}))
+        history_data = await get_historical_klines(symbol=symbol, interval=interval, limit=512)
         
         # 2. Run Kronos
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running Kronos Inference..."}))
@@ -257,16 +265,3 @@ async def run_analysis_for_symbol(symbol: str):
             })
     except Exception as e:
         print(f"[{symbol}] Analysis error: {e}")
-
-async def ai_trading_loop():
-    symbols = ["BTCUSDT", "ETHUSDT"]
-    while True:
-        try:
-            tasks = [run_analysis_for_symbol(sym) for sym in symbols]
-            await asyncio.gather(*tasks, return_exceptions=True)
-        except Exception as e:
-            print(f"Loop error: {e}")
-        finally:
-            # Wait for next cycle (e.g. 5 minutes)
-            await asyncio.sleep(300)
-

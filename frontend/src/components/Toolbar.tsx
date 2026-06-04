@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { useTradingStore } from '@/store/useStore';
-import { Search, ChevronDown, Activity } from 'lucide-react';
+import { Search, ChevronDown, Activity, Zap } from 'lucide-react';
 import IndicatorLibraryModal from './IndicatorLibraryModal';
 
 const ALL_INTERVALS = [
@@ -35,6 +35,28 @@ export default function Toolbar() {
 
   const pairRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<HTMLDivElement>(null);
+
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const handleAnalyzeAI = async () => {
+    setIsAnalyzing(true);
+    try {
+      const host = window.location.hostname;
+      const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
+      
+      await fetch(`${API_URL}/api/analysis/run`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ symbol: pair, interval: interval })
+      });
+    } catch (err) {
+      console.error("Failed to trigger AI analysis", err);
+    } finally {
+      setTimeout(() => setIsAnalyzing(false), 2000);
+    }
+  };
 
   useEffect(() => {
     // Fetch all pairs from Binance
@@ -139,6 +161,24 @@ export default function Toolbar() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>
+
+      {/* Analyze AI Trigger */}
+      <div className="relative shrink-0">
+        <button 
+          onClick={handleAnalyzeAI}
+          disabled={isAnalyzing}
+          className={`flex items-center gap-2 border text-sm font-medium rounded-md px-3 py-1.5 transition-colors ${
+            isAnalyzing 
+              ? 'bg-slate-700/50 border-slate-600 text-slate-400 cursor-not-allowed'
+              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+          }`}
+        >
+          <Zap size={14} className={isAnalyzing ? 'animate-pulse' : ''} />
+          {isAnalyzing ? 'Đang phân tích...' : 'Phân tích AI'}
+        </button>
       </div>
 
       <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>

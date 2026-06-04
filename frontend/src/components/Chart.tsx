@@ -131,7 +131,7 @@ export default function ChartComponent() {
               'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({ data: drawingsJson })
-          }).catch(console.error);
+          }).catch(() => {});
         }, 2000);
       }
     };

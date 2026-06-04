@@ -5,16 +5,24 @@ import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, LogicalRan
 import { useTradingStore, IndicatorConfig } from '@/store/useStore';
 import { INDICATOR_REGISTRY, IndicatorDef } from '@/lib/indicatorsRegistry';
 import DrawingToolbar from './DrawingToolbar';
-import { DrawingManager, getToolRegistry } from 'lightweight-charts-drawing';
+import { DrawingManager, getToolRegistry, TOOL_DEFINITIONS } from 'lightweight-charts-drawing';
 
+// Initialize the drawing tool registry once (global, runs once)
+const registry = getToolRegistry();
+TOOL_DEFINITIONS.forEach(def => registry.register(def));
+
+// Factory for importing saved drawings from DB
 const drawingFactory = (type: string, data: any) => {
-  const registry = getToolRegistry();
   const entry = registry.get(type);
   if (entry) {
     return entry.factory(data.id, data.anchors, data.style, data.options);
   }
   return null;
 };
+
+// Generate unique drawing IDs
+let drawingCounter = 0;
+const genDrawingId = (type: string) => `${type}-${Date.now()}-${++drawingCounter}`;
 
 type KlineData = {
   time: UTCTimestamp;
@@ -25,9 +33,15 @@ type KlineData = {
   volume: number;
 };
 
+type Anchor = {
+  time: any;
+  price: number;
+};
+
 export default function ChartComponent() {
   const [isLoading, setIsLoading] = useState(false);
   const [activeTool, setActiveTool] = useState<string | null>(null);
+  const [pendingClickCount, setPendingClickCount] = useState(0);
 
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -39,6 +53,11 @@ export default function ChartComponent() {
   const chartDataRef = useRef<KlineData[]>([]);
   const isLoadingRef = useRef(false);
   const isInitialLoadRef = useRef(true);
+
+  // Refs for drawing FSM — avoids stale closures in chart.subscribeClick
+  const activeToolRef = useRef<string | null>(null);
+  const pendingAnchorsRef = useRef<Anchor[]>([]);
+  const requiredAnchorsRef = useRef<number>(2);
 
   const { pair, interval, signals, indicators, token } = useTradingStore();
 
@@ -64,6 +83,7 @@ export default function ChartComponent() {
 
   // 1. Setup Chart and Handle Infinite Scroll
   useEffect(() => {
+    let isMounted = true;
     if (!chartContainerRef.current) return;
 
     const chart = createChart(chartContainerRef.current, {
@@ -78,7 +98,7 @@ export default function ChartComponent() {
         shiftVisibleRangeOnNewBar: true,
       },
       handleScroll: {
-        mouseWheel: false, // Mouse wheel zooms instead of scrolling
+        mouseWheel: false,
         pressedMouseMove: true,
         horzTouchDrag: true,
         vertTouchDrag: true,
@@ -90,8 +110,6 @@ export default function ChartComponent() {
       },
       autoSize: true,
     });
-    
-    // Custom price scales are configured when indicators are active
 
     chartRef.current = chart;
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
@@ -101,7 +119,7 @@ export default function ChartComponent() {
       priceLineVisible: true,
       priceLineColor: '#10b981',
       priceLineWidth: 1,
-      priceLineStyle: 3, // dashed
+      priceLineStyle: 3,
     });
     seriesRef.current = candlestickSeries;
 
@@ -109,11 +127,6 @@ export default function ChartComponent() {
     const manager = new DrawingManager();
     manager.attach(chart, candlestickSeries, chartContainerRef.current);
     drawingManagerRef.current = manager;
-
-    // Listen to tool change
-    manager.on('tool:changed', (event: any) => {
-      setActiveTool(event.tool);
-    });
 
     let saveTimeout: NodeJS.Timeout;
     const saveDrawings = () => {
@@ -136,11 +149,61 @@ export default function ChartComponent() {
       }
     };
 
-    // Auto-save drawings
     manager.on('drawing:added', saveDrawings);
     manager.on('drawing:updated', saveDrawings);
     manager.on('drawing:removed', saveDrawings);
     manager.on('drawing:cleared', saveDrawings);
+
+    // =========================================================
+    // CUSTOM INTERACTIVE DRAWING CREATION VIA subscribeClick
+    // The library's setActiveTool() API doesn't implement drawing
+    // creation internally, so we handle it here manually.
+    // =========================================================
+    const handleChartClick = (param: any) => {
+      const toolType = activeToolRef.current;
+      if (!toolType || !param.point || !param.time) return;
+
+      const price = candlestickSeries.coordinateToPrice(param.point.y);
+      if (price === null) return;
+
+      const anchor: Anchor = { time: param.time, price };
+      const newAnchors = [...pendingAnchorsRef.current, anchor];
+      pendingAnchorsRef.current = newAnchors;
+      setPendingClickCount(newAnchors.length);
+
+      const required = requiredAnchorsRef.current;
+
+      if (newAnchors.length >= required) {
+        // All anchors collected — create the drawing
+        const entry = registry.get(toolType);
+        if (entry && drawingManagerRef.current) {
+          const drawing = entry.factory(
+            genDrawingId(toolType),
+            newAnchors,
+            {}, // default style
+            {}  // default options
+          );
+          if (drawing) {
+            drawingManagerRef.current.addDrawing(drawing);
+          }
+        }
+        // Reset FSM — return to select mode
+        pendingAnchorsRef.current = [];
+        setPendingClickCount(0);
+        activeToolRef.current = null;
+        setActiveTool(null);
+        // Re-enable chart scroll
+        chart.applyOptions({
+          handleScroll: {
+            pressedMouseMove: true,
+            horzTouchDrag: true,
+            vertTouchDrag: true,
+          }
+        });
+      }
+    };
+
+    chart.subscribeClick(handleChartClick);
 
     // Load initial data
     isInitialLoadRef.current = true;
@@ -150,24 +213,20 @@ export default function ChartComponent() {
       const host = window.location.hostname;
       const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
       fetch(`${API_URL}/api/drawings/${pair}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers: { 'Authorization': `Bearer ${token}` }
       })
       .then(res => res.json())
       .then(data => {
-        if (data.data && Array.isArray(data.data) && drawingManagerRef.current) {
-          // Temporarily clear old to load new
+        if (data.data && Array.isArray(data.data) && data.data.length > 0 && drawingManagerRef.current) {
           drawingManagerRef.current.clearAll();
           drawingManagerRef.current.importDrawings(data.data, drawingFactory);
         }
       })
-      .catch(() => {
-        // Silently ignore fetch errors (e.g. VPN blocking port 8000 or CORS)
-      });
+      .catch(() => {});
     }
 
     fetchKlines().then(data => {
+      if (!isMounted) return;
       chartDataRef.current = data;
       setChartData(data);
       candlestickSeries.setData(data);
@@ -178,7 +237,6 @@ export default function ChartComponent() {
     const onVisibleLogicalRangeChanged = async (logicalRange: LogicalRange | null) => {
       if (!logicalRange || isInitialLoadRef.current || isLoadingRef.current) return;
       
-      // If we scroll near the left edge (older data)
       if (logicalRange.from < 50) {
         if (chartDataRef.current.length === 0) return;
         
@@ -186,18 +244,14 @@ export default function ChartComponent() {
         const oldestTime = (chartDataRef.current[0].time as number) * 1000;
         
         fetchKlines(oldestTime - 1).then(olderData => {
+          if (!isMounted) return;
           if (olderData.length > 0) {
             setChartData(prevData => {
-              // Ensure strictly older
               const filteredOlder = olderData.filter((d: KlineData) => d.time < prevData[0].time);
               if (filteredOlder.length === 0) return prevData;
               
               const newData = [...filteredOlder, ...prevData];
-              
-              // Sort to guarantee ascending order
               newData.sort((a, b) => (a.time as number) - (b.time as number));
-              
-              // Deduplicate by time
               const uniqueData = newData.filter((v, i, a) => i === 0 || v.time !== a[i - 1].time);
               
               chartDataRef.current = uniqueData;
@@ -215,6 +269,8 @@ export default function ChartComponent() {
     chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
 
     return () => {
+      isMounted = false;
+      chart.unsubscribeClick(handleChartClick);
       if (drawingManagerRef.current) {
         drawingManagerRef.current.detach();
       }
@@ -244,7 +300,6 @@ export default function ChartComponent() {
         };
         seriesRef.current.update(newKline);
         
-        // Optimistically update chartData for indicators
         setChartData(prev => {
           if (prev.length === 0) {
             chartDataRef.current = [newKline];
@@ -282,14 +337,11 @@ export default function ChartComponent() {
   useEffect(() => {
     if (!chartRef.current || chartData.length === 0) return;
     
-    // Clean up existing indicator series
     Object.values(indicatorsSeriesRef.current).forEach(series => {
       if (series && chartRef.current) {
         try {
           chartRef.current.removeSeries(series);
-        } catch (e) {
-          // Ignore harmless remove errors on unmount/re-render
-        }
+        } catch (e) {}
       }
     });
     indicatorsSeriesRef.current = {};
@@ -307,14 +359,13 @@ export default function ChartComponent() {
     const oscillators = activeIndicators.filter(ind => INDICATOR_REGISTRY.find((d: IndicatorDef) => d.id === ind.indicatorId)?.placement === 'oscillator');
     const totalOscillators = oscillators.length;
 
-    // Adjust main chart margin based on oscillators
-    const oscHeight = 0.15; // 15% of height per oscillator
+    const oscHeight = 0.15;
     const bottomMargin = totalOscillators > 0 ? (totalOscillators * oscHeight + 0.05) : 0.1;
     
     chartRef.current.priceScale('right').applyOptions({
       scaleMargins: {
         top: 0.1,
-        bottom: bottomMargin > 0.8 ? 0.8 : bottomMargin, // Cap at 80%
+        bottom: bottomMargin > 0.8 ? 0.8 : bottomMargin,
       },
     });
 
@@ -335,30 +386,22 @@ export default function ChartComponent() {
         priceScaleId = `osc_${ind.instanceId}`;
         hasOscillator = true;
         topMargin = 1 - bottomMargin + (oscIndex * oscHeight);
-        botMargin = 1 - topMargin - oscHeight + 0.02; // Small gap
+        botMargin = 1 - topMargin - oscHeight + 0.02;
         oscIndex++;
       }
 
-      // Create series
       def.lines.forEach(lineDef => {
         let series: ISeriesApi<any>;
         const color = lineDef.colorParam && ind.params[lineDef.colorParam] ? ind.params[lineDef.colorParam] : lineDef.defaultColor || '#ffffff';
         
         if (lineDef.type === 'histogram') {
-          series = chartRef.current!.addSeries(HistogramSeries, {
-            priceScaleId,
-          });
+          series = chartRef.current!.addSeries(HistogramSeries, { priceScaleId });
         } else {
-          series = chartRef.current!.addSeries(LineSeries, {
-            color,
-            lineWidth: 2,
-            priceScaleId,
-          });
+          series = chartRef.current!.addSeries(LineSeries, { color, lineWidth: 2, priceScaleId });
         }
         
         indicatorsSeriesRef.current[`${ind.instanceId}_${lineDef.id}`] = series;
 
-        // Map data
         const seriesData = results
           .filter(r => r[lineDef.id] !== undefined && r[lineDef.id] !== null && !Number.isNaN(r[lineDef.id]))
           .map(r => {
@@ -385,22 +428,30 @@ export default function ChartComponent() {
 
   }, [chartData, indicators]);
 
+  // Tool selection handler — updates both state and ref (ref is used in subscribeClick closure)
   const handleSelectTool = useCallback((tool: string | null) => {
-    if (drawingManagerRef.current) {
-      drawingManagerRef.current.setActiveTool(tool);
-      setActiveTool(tool);
-      
-      // Disable scrolling when a tool is active to allow drawing
-      if (chartRef.current) {
-        const isDrawing = tool !== null;
-        chartRef.current.applyOptions({
-          handleScroll: {
-            pressedMouseMove: !isDrawing,
-            horzTouchDrag: !isDrawing,
-            vertTouchDrag: !isDrawing,
-          }
-        });
-      }
+    // Reset any pending drawing when switching tools
+    pendingAnchorsRef.current = [];
+    setPendingClickCount(0);
+    activeToolRef.current = tool;
+    setActiveTool(tool);
+
+    // Look up required anchor count from registry
+    if (tool) {
+      const entry = registry.get(tool);
+      requiredAnchorsRef.current = entry?.requiredAnchors ?? 2;
+    }
+
+    // Disable chart scroll when a drawing tool is active
+    if (chartRef.current) {
+      const isDrawing = tool !== null;
+      chartRef.current.applyOptions({
+        handleScroll: {
+          pressedMouseMove: !isDrawing,
+          horzTouchDrag: !isDrawing,
+          vertTouchDrag: !isDrawing,
+        }
+      });
     }
   }, []);
 
@@ -419,11 +470,23 @@ export default function ChartComponent() {
     }
   }, []);
 
+  // Required anchors for the current tool (for UI hint)
+  const requiredForCurrentTool = activeTool ? (registry.get(activeTool)?.requiredAnchors ?? 2) : 0;
+
   return (
     <div className="relative w-full h-full flex overflow-hidden group">
       {isLoading && (
         <div className="absolute top-4 right-4 glass-panel px-3 py-1.5 rounded-xl text-xs text-slate-300 font-medium z-20">
           Loading...
+        </div>
+      )}
+
+      {/* Drawing mode hint */}
+      {activeTool && (
+        <div className="absolute top-4 left-1/2 -translate-x-1/2 glass-panel px-4 py-2 rounded-xl text-xs text-amber-300 font-medium z-20 border border-amber-500/30 flex items-center gap-2 pointer-events-none">
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse inline-block" />
+          Click {requiredForCurrentTool - pendingClickCount} more point{requiredForCurrentTool - pendingClickCount !== 1 ? 's' : ''} to draw
+          {pendingClickCount > 0 && <span className="text-amber-400/70"> ({pendingClickCount}/{requiredForCurrentTool})</span>}
         </div>
       )}
       

@@ -1,7 +1,7 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useTradingStore } from '@/store/useStore';
-import { Search, ChevronDown, Activity, Zap } from 'lucide-react';
+import { Search, ChevronDown, Activity, Zap, Bot } from 'lucide-react';
 import IndicatorLibraryModal from './IndicatorLibraryModal';
 
 const ALL_INTERVALS = [
@@ -23,7 +23,7 @@ const ALL_INTERVALS = [
   { label: '1M', value: '1M' },
 ];
 
-export default function Toolbar() {
+export default function Toolbar({ onToggleAiSidebar }: { onToggleAiSidebar?: () => void }) {
   const { pair, interval, indicators, setPair, setInterval, toggleIndicator } = useTradingStore();
   
   const [pairs, setPairs] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']);
@@ -92,10 +92,25 @@ export default function Toolbar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const filteredPairs = pairs.filter(p => p.toLowerCase().includes(searchPair.toLowerCase())).slice(0, 50); // limit to 50 for perf
+  const filteredPairs = useMemo(() => {
+    return pairs.filter(p => p.toLowerCase().includes(searchPair.toLowerCase())).slice(0, 50);
+  }, [pairs, searchPair]);
 
   return (
-    <div className="flex items-center gap-4 glass-panel rounded-2xl p-2.5 mb-4 relative z-40 w-max shadow-xl">
+    <div className="flex flex-wrap items-center gap-2 md:gap-4 glass-panel rounded-2xl p-2 md:p-2.5 mb-2 md:mb-4 relative z-40 w-full shadow-xl">
+      
+      {/* AI Sidebar Toggle (Mobile only) */}
+      {onToggleAiSidebar && (
+        <div className="md:hidden shrink-0">
+          <button 
+            onClick={onToggleAiSidebar}
+            className="flex items-center justify-center w-10 h-10 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl hover:bg-amber-500/20 transition-all active:scale-95"
+            title="Open AI Stream"
+          >
+            <Bot size={18} />
+          </button>
+        </div>
+      )}
       
       {/* Pair Selector */}
       <div className="relative" ref={pairRef}>
@@ -165,7 +180,7 @@ export default function Toolbar() {
                 <button
                   key={inv.value}
                   onClick={() => { setInterval(inv.value); setIsIntervalOpen(false); }}
-                  className={`px-2 py-2 text-xs font-medium rounded-lg transition-all duration-200 ${
+                  className={`px-2 py-2 text-xs font-medium rounded-lg transition-all duration-200 active:scale-95 ${
                     interval === inv.value
                       ? 'bg-amber-500/10 text-amber-400 shadow-sm border border-amber-500/20'
                       : 'bg-transparent border border-transparent text-slate-300 hover:bg-white/5 hover:text-slate-100'
@@ -192,7 +207,7 @@ export default function Toolbar() {
         </button>
         
         {isModelOpen && (
-          <div className="absolute top-full left-0 mt-2 w-48 glass-panel border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50">
+          <div className="absolute top-full right-0 md:left-0 md:right-auto mt-2 w-48 glass-panel border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50">
             <div className="p-3 border-b border-white/10 bg-slate-950/50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               AI Core Engine
             </div>
@@ -201,7 +216,7 @@ export default function Toolbar() {
                 <button
                   key={mod.value}
                   onClick={() => { setModelType(mod.value); setIsModelOpen(false); }}
-                  className={`px-3 py-2 text-sm text-left transition-all duration-200 rounded-lg ${
+                  className={`px-3 py-2 text-sm text-left transition-all duration-200 rounded-lg active:scale-95 ${
                     modelType === mod.value
                       ? 'bg-amber-500/10 text-amber-400 font-medium border border-amber-500/20'
                       : 'bg-transparent border border-transparent text-slate-300 hover:bg-white/5 hover:text-slate-100'
@@ -218,11 +233,11 @@ export default function Toolbar() {
       <div className="h-5 w-[1px] bg-white/10 shrink-0"></div>
 
       {/* Analyze AI Trigger */}
-      <div className="relative shrink-0">
+      <div className="relative shrink-0 flex-1 min-w-[120px] md:flex-none">
         <button 
           onClick={handleAnalyzeAI}
           disabled={isAnalyzing}
-          className={`flex items-center gap-2 px-6 py-2 text-sm font-semibold rounded-xl transition-all duration-300 active:scale-95 ${
+          className={`flex w-full justify-center items-center gap-2 px-4 md:px-6 py-2 text-sm font-semibold rounded-xl transition-all duration-300 active:scale-95 ${
             isAnalyzing 
               ? 'bg-white/5 text-slate-500 cursor-not-allowed border border-white/5'
               : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-[0_4px_15px_rgba(251,191,36,0.25)] hover:shadow-[0_4px_20px_rgba(251,191,36,0.4)] hover:scale-[1.02]'

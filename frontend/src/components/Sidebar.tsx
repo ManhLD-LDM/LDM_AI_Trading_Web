@@ -3,6 +3,8 @@ import { useEffect, useState, useRef } from 'react';
 import { useTradingStore } from '@/store/useStore';
 import { UTCTimestamp } from 'lightweight-charts';
 
+import { X } from 'lucide-react';
+
 type AIEvent = {
   type: string;
   agent_name: string;
@@ -13,7 +15,12 @@ type AIEvent = {
   ts?: number; // unix timestamp from backend
 };
 
-export default function Sidebar() {
+interface SidebarProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const [events, setEvents] = useState<AIEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   
@@ -67,14 +74,37 @@ export default function Sidebar() {
   };
 
   return (
-    <div className="w-80 h-full flex flex-col glass-panel border-l border-white/5 p-6 shrink-0 z-20">
-      <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-100 mb-8 flex items-center justify-between">
-        AI Intelligence
-        <span className="flex h-2 w-2 relative">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-        </span>
-      </h2>
+    <>
+      {/* Mobile overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm z-40 md:hidden"
+          onClick={onClose}
+        />
+      )}
+      
+      <div className={`
+        ${isOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}
+        fixed md:static inset-y-0 right-0
+        w-80 h-full flex flex-col glass-panel border-l border-white/5 p-6 shrink-0 z-50 md:z-20
+        transition-transform duration-300 ease-in-out
+      `}>
+        <div className="flex items-center justify-between mb-8">
+          <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-100 flex items-center">
+            AI Intelligence
+            <span className="flex h-2 w-2 relative ml-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+            </span>
+          </h2>
+          {/* Close button for mobile */}
+          <button 
+            onClick={onClose}
+            className="md:hidden p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 active:scale-95 transition-all"
+          >
+            <X size={20} />
+          </button>
+        </div>
       
       <div ref={scrollRef} className="flex-1 overflow-y-auto pr-2 custom-scrollbar relative pl-2">
         {events.length === 0 ? (
@@ -128,5 +158,6 @@ export default function Sidebar() {
         </div>
       </div>
     </div>
+    </>
   );
 }

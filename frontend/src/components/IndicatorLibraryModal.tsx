@@ -35,7 +35,7 @@ export default function IndicatorLibraryModal({ isOpen, onClose }: Props) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose}></div>
       
       <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-800 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col max-h-[80vh]">
@@ -111,7 +111,7 @@ export default function IndicatorLibraryModal({ isOpen, onClose }: Props) {
                 <div key={ind.id} className="group flex items-center justify-between p-3 rounded-xl hover:bg-slate-800/50 border border-transparent hover:border-slate-700 transition-all">
                   <div>
                     <div className="font-medium text-slate-200">{ind.name}</div>
-                    <div className="text-xs text-slate-500 mt-0.5">{ind.category} • {ind.shortName}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">{ind.category} • {ind.shortName}</div>
                   </div>
                   <button 
                     onClick={() => handleAdd(ind.id)}

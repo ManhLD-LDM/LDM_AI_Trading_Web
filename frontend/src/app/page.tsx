@@ -11,6 +11,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<'live' | 'backtest' | 'settings'>('live');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
   const { user, logout } = useTradingStore();
 
   useEffect(() => {
@@ -27,9 +28,9 @@ export default function Home() {
 
   return (
     <main className="flex h-screen w-full bg-slate-950 text-slate-200 overflow-hidden font-sans">
-      {/* Sidebar for Navigation */}
-      <div className="w-16 h-full glass-panel border-r border-white/5 flex flex-col items-center py-4 gap-6 z-20 shrink-0">
-        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-violet-600 flex items-center justify-center font-bold text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.3)] mb-4">
+      {/* Sidebar for Navigation -> Bottom Nav on Mobile */}
+      <div className="fixed md:static bottom-0 left-0 w-full md:w-16 h-16 md:h-full glass-panel border-t md:border-r md:border-t-0 border-white/5 flex flex-row md:flex-col items-center justify-around md:justify-start md:py-4 z-50 shrink-0">
+        <div className="hidden md:flex w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-violet-600 items-center justify-center font-bold text-slate-950 shadow-[0_0_15px_rgba(251,191,36,0.3)] mb-4">
           LD
         </div>
         
@@ -57,7 +58,7 @@ export default function Home() {
           <Settings size={22} strokeWidth={1.5} />
         </button>
 
-        <div className="mt-auto mb-4 flex flex-col gap-4">
+        <div className="md:mt-auto md:mb-4 flex flex-row md:flex-col gap-0 md:gap-4">
           {mounted && (
             user ? (
               <button 
@@ -103,20 +104,20 @@ export default function Home() {
                 )}
               </header>
 
-              <div className="flex-1 flex flex-col p-4 overflow-hidden gap-4">
-                <Toolbar />
+              <div className="flex-1 flex flex-col p-4 pb-20 md:pb-4 overflow-hidden gap-4">
+                <Toolbar onToggleAiSidebar={() => setIsAiSidebarOpen(true)} />
                 <div className="flex-1 relative glass-panel rounded-2xl overflow-hidden shadow-2xl">
                   <ChartComponent />
                 </div>
               </div>
             </div>
-            <Sidebar />
+            <Sidebar isOpen={isAiSidebarOpen} onClose={() => setIsAiSidebarOpen(false)} />
           </>
         )}
 
         {/* Tab: Backtest */}
         {activeTab === 'backtest' && (
-          <div className="flex-1 p-8 overflow-y-auto">
+          <div className="flex-1 p-8 pb-24 md:pb-8 overflow-y-auto">
             <h2 className="text-2xl font-light mb-8 text-white tracking-wide">Backtest Strategy</h2>
             <div className="glass-panel p-8 rounded-2xl max-w-2xl">
               <p className="text-slate-400 text-sm mb-8">Select parameters to run backtest against historical data.</p>
@@ -160,7 +161,7 @@ export default function Home() {
 
         {/* Tab: Settings */}
         {activeTab === 'settings' && (
-          <div className="flex-1 p-8 overflow-y-auto">
+          <div className="flex-1 p-8 pb-24 md:pb-8 overflow-y-auto">
             <h2 className="text-2xl font-light mb-8 text-white tracking-wide">System Settings</h2>
             <div className="glass-panel p-8 rounded-2xl max-w-2xl">
               <div className="space-y-8">

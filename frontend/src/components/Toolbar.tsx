@@ -95,21 +95,21 @@ export default function Toolbar() {
   const filteredPairs = pairs.filter(p => p.toLowerCase().includes(searchPair.toLowerCase())).slice(0, 50); // limit to 50 for perf
 
   return (
-    <div className="flex items-center gap-4 bg-slate-800/80 rounded-lg p-2 mb-4 border border-slate-700 shadow-sm relative z-40">
+    <div className="flex items-center gap-4 glass-panel rounded-2xl p-2.5 mb-4 relative z-40 w-max shadow-xl">
       
       {/* Pair Selector */}
       <div className="relative" ref={pairRef}>
         <button 
           onClick={() => setIsPairOpen(!isPairOpen)}
-          className="flex items-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors w-32 justify-between"
+          className="flex items-center gap-2 bg-white/5 border border-white/10 text-slate-200 text-sm font-medium rounded-xl px-4 py-2 hover:bg-white/10 transition-all duration-300 w-32 justify-between"
         >
           {pair}
           <ChevronDown size={14} className="text-slate-400" />
         </button>
         
         {isPairOpen && (
-          <div className="absolute top-full left-0 mt-1 w-48 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden flex flex-col max-h-64">
-            <div className="p-2 border-b border-slate-700 flex items-center gap-2 bg-slate-900/50">
+          <div className="absolute top-full left-0 mt-2 w-52 glass-panel border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-72">
+            <div className="p-3 border-b border-white/10 flex items-center gap-2 bg-slate-950/50">
               <Search size={14} className="text-slate-400" />
               <input 
                 type="text" 
@@ -125,45 +125,45 @@ export default function Toolbar() {
                 <button
                   key={p}
                   onClick={() => { setPair(p); setIsPairOpen(false); setSearchPair(''); }}
-                  className={`w-full text-left px-3 py-2 text-sm transition-colors ${pair === p ? 'bg-emerald-500/20 text-emerald-400' : 'text-slate-300 hover:bg-slate-700'}`}
+                  className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${pair === p ? 'bg-amber-500/10 text-amber-400 font-medium' : 'text-slate-300 hover:bg-white/5'}`}
                 >
                   {p}
                 </button>
               ))}
               {filteredPairs.length === 0 && (
-                <div className="p-3 text-xs text-slate-500 text-center">No pairs found</div>
+                <div className="p-4 text-xs text-slate-500 text-center">No pairs found</div>
               )}
             </div>
           </div>
         )}
       </div>
 
-      <div className="h-4 w-[1px] bg-slate-700"></div>
+      <div className="h-5 w-[1px] bg-white/10"></div>
 
       {/* Timeframes */}
       <div className="relative shrink-0" ref={intervalRef}>
         <button 
           onClick={() => setIsIntervalOpen(!isIntervalOpen)}
-          className="flex items-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors justify-between min-w-[70px]"
+          className="flex items-center gap-2 bg-white/5 border border-white/10 text-slate-200 text-sm font-medium rounded-xl px-4 py-2 hover:bg-white/10 transition-all duration-300 justify-between min-w-[80px]"
         >
           {ALL_INTERVALS.find(i => i.value === interval)?.label || interval}
           <ChevronDown size={14} className="text-slate-400" />
         </button>
         
         {isIntervalOpen && (
-          <div className="absolute top-full left-0 mt-1 w-32 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden flex flex-col z-50">
-            <div className="p-2 border-b border-slate-700 bg-slate-900/50 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="absolute top-full left-0 mt-2 w-40 glass-panel border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50">
+            <div className="p-3 border-b border-white/10 bg-slate-950/50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               Timeframe
             </div>
-            <div className="grid grid-cols-2 gap-1 p-2">
+            <div className="grid grid-cols-3 gap-1 p-2">
               {ALL_INTERVALS.map((inv) => (
                 <button
                   key={inv.value}
                   onClick={() => { setInterval(inv.value); setIsIntervalOpen(false); }}
-                  className={`px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  className={`px-2 py-2 text-xs font-medium rounded-lg transition-all duration-200 ${
                     interval === inv.value
-                      ? 'bg-emerald-500/20 text-emerald-400'
-                      : 'bg-transparent text-slate-300 hover:bg-slate-700 hover:text-slate-200'
+                      ? 'bg-amber-500/10 text-amber-400 shadow-sm border border-amber-500/20'
+                      : 'bg-transparent border border-transparent text-slate-300 hover:bg-white/5 hover:text-slate-100'
                   }`}
                 >
                   {inv.label}
@@ -174,32 +174,32 @@ export default function Toolbar() {
         )}
       </div>
 
-      <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>
+      <div className="h-5 w-[1px] bg-white/10 shrink-0"></div>
 
       {/* Model Selector */}
       <div className="relative shrink-0" ref={modelRef}>
         <button 
           onClick={() => setIsModelOpen(!isModelOpen)}
-          className="flex items-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors justify-between min-w-[130px]"
+          className="flex items-center gap-2 bg-white/5 border border-white/10 text-slate-200 text-sm font-medium rounded-xl px-4 py-2 hover:bg-white/10 transition-all duration-300 justify-between min-w-[140px]"
         >
           {ALL_MODELS.find(m => m.value === modelType)?.label || modelType}
           <ChevronDown size={14} className="text-slate-400" />
         </button>
         
         {isModelOpen && (
-          <div className="absolute top-full left-0 mt-1 w-40 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden flex flex-col z-50">
-            <div className="p-2 border-b border-slate-700 bg-slate-900/50 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <div className="absolute top-full left-0 mt-2 w-48 glass-panel border border-white/10 rounded-xl shadow-2xl overflow-hidden flex flex-col z-50">
+            <div className="p-3 border-b border-white/10 bg-slate-950/50 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
               AI Core Engine
             </div>
-            <div className="flex flex-col p-1">
+            <div className="flex flex-col p-1.5 gap-1">
               {ALL_MODELS.map((mod) => (
                 <button
                   key={mod.value}
                   onClick={() => { setModelType(mod.value); setIsModelOpen(false); }}
-                  className={`px-3 py-2 text-sm text-left transition-colors rounded-md ${
+                  className={`px-3 py-2 text-sm text-left transition-all duration-200 rounded-lg ${
                     modelType === mod.value
-                      ? 'bg-emerald-500/20 text-emerald-400 font-medium'
-                      : 'bg-transparent text-slate-300 hover:bg-slate-700 hover:text-slate-200'
+                      ? 'bg-amber-500/10 text-amber-400 font-medium border border-amber-500/20'
+                      : 'bg-transparent border border-transparent text-slate-300 hover:bg-white/5 hover:text-slate-100'
                   }`}
                 >
                   {mod.label}
@@ -210,17 +210,17 @@ export default function Toolbar() {
         )}
       </div>
 
-      <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>
+      <div className="h-5 w-[1px] bg-white/10 shrink-0"></div>
 
       {/* Analyze AI Trigger */}
       <div className="relative shrink-0">
         <button 
           onClick={handleAnalyzeAI}
           disabled={isAnalyzing}
-          className={`flex items-center gap-2 border text-sm font-medium rounded-md px-3 py-1.5 transition-colors ${
+          className={`flex items-center gap-2 px-6 py-2 text-sm font-semibold rounded-xl transition-all duration-300 active:scale-95 ${
             isAnalyzing 
-              ? 'bg-slate-700/50 border-slate-600 text-slate-400 cursor-not-allowed'
-              : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20'
+              ? 'bg-white/5 text-slate-500 cursor-not-allowed border border-white/5'
+              : 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-[0_4px_15px_rgba(251,191,36,0.25)] hover:shadow-[0_4px_20px_rgba(251,191,36,0.4)] hover:scale-[1.02]'
           }`}
         >
           <Zap size={14} className={isAnalyzing ? 'animate-pulse' : ''} />
@@ -228,13 +228,13 @@ export default function Toolbar() {
         </button>
       </div>
 
-      <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>
+      <div className="h-5 w-[1px] bg-white/10 shrink-0"></div>
 
       {/* Indicators Modal Trigger */}
       <div className="relative shrink-0">
         <button 
           onClick={() => setIsIndLibraryOpen(true)}
-          className="flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-indigo-500/20 transition-colors"
+          className="flex items-center gap-2 bg-white/5 border border-white/10 text-slate-300 text-sm font-medium rounded-xl px-4 py-2 hover:bg-white/10 hover:text-slate-100 transition-all duration-300"
         >
           <Activity size={14} />
           Indicators

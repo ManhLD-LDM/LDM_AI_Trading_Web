@@ -59,59 +59,71 @@ export default function Sidebar() {
   }, [events]);
 
   const getAgentColor = (name: string) => {
-    if (name.includes('Kronos')) return 'text-emerald-400 bg-emerald-400/10';
-    if (name.includes('Tech')) return 'text-blue-400 bg-blue-400/10';
-    if (name.includes('Sentiment')) return 'text-purple-400 bg-purple-400/10';
-    if (name.includes('Trader')) return 'text-indigo-400 bg-indigo-400/10';
-    return 'text-slate-400 bg-slate-400/10';
+    if (name.includes('Kronos')) return { text: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/30' };
+    if (name.includes('Tech')) return { text: 'text-blue-400', bg: 'bg-blue-400/10', border: 'border-blue-400/30' };
+    if (name.includes('Sentiment')) return { text: 'text-violet-400', bg: 'bg-violet-400/10', border: 'border-violet-400/30' };
+    if (name.includes('Trader')) return { text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/30' };
+    return { text: 'text-slate-400', bg: 'bg-slate-400/10', border: 'border-slate-400/30' };
   };
 
   return (
-    <div className="w-80 h-full flex flex-col bg-slate-900/50 backdrop-blur-md border-l border-slate-800 p-4 shrink-0">
-      <h2 className="text-lg font-semibold text-white mb-4 flex items-center justify-between">
-        AI Thought Stream
+    <div className="w-80 h-full flex flex-col glass-panel border-l border-white/5 p-6 shrink-0 z-20">
+      <h2 className="text-sm font-semibold uppercase tracking-widest text-slate-100 mb-8 flex items-center justify-between">
+        AI Intelligence
         <span className="flex h-2 w-2 relative">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
         </span>
       </h2>
       
-      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto pr-2 custom-scrollbar relative pl-2">
         {events.length === 0 ? (
-          <div className="text-sm text-slate-500 italic text-center mt-10">
-            Waiting for AI analysis...
+          <div className="text-xs text-slate-500 italic text-center mt-10">
+            Awaiting analysis...
           </div>
         ) : (
-          events.map((ev, i) => (
-            <div key={i} className="bg-slate-800/60 p-3 rounded-lg border border-slate-700 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="flex items-center justify-between mb-2">
-                <span className={`text-xs font-medium px-2 py-1 rounded ${getAgentColor(ev.agent_name)}`}>
-                  {ev.agent_name}
-                </span>
-                <span className="text-xs text-slate-400">{ev.timestamp}</span>
-              </div>
-              <p className="text-sm text-slate-300 leading-relaxed break-words">
-                {ev.thought}
-              </p>
-            </div>
-          ))
+          <div className="space-y-0">
+            {events.map((ev, i) => {
+              const colors = getAgentColor(ev.agent_name);
+              const isLast = i === events.length - 1;
+              return (
+                <div key={i} className={`relative pl-6 ${isLast ? 'pb-2' : 'pb-6 border-l border-white/5'} animate-in fade-in slide-in-from-right-4 duration-300`}>
+                  {/* Timeline Dot */}
+                  <div className={`absolute left-[-5px] top-1 w-2.5 h-2.5 rounded-full ${colors.bg} border ${colors.border}`}></div>
+                  
+                  <div className="flex items-center justify-between mb-1.5 -mt-1">
+                    <span className={`text-[10px] font-bold tracking-wider uppercase ${colors.text}`}>
+                      {ev.agent_name}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">{ev.timestamp}</span>
+                  </div>
+                  <p className="text-sm text-slate-300 leading-relaxed break-words font-light">
+                    {ev.thought}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
 
-      <div className="mt-4 pt-4 border-t border-slate-800">
-        <h3 className="text-sm font-medium text-slate-400 mb-2">Bot Configuration</h3>
-        <div className="space-y-2">
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Pair</span>
-            <span className="text-white">{pair}</span>
+      <div className="mt-6 pt-6 border-t border-white/5">
+        <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">System Status</h3>
+        <div className="space-y-2.5">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-400">Target Pair</span>
+            <span className="text-slate-200 font-medium">{pair}</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Timeframe</span>
-            <span className="text-white">{interval}</span>
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-400">Timeframe</span>
+            <span className="text-slate-200 font-medium">{interval}</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-slate-500">Backend</span>
-            <span className="text-emerald-400">Port 8000 (Active)</span>
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-400">Connection</span>
+            <span className="text-emerald-400 font-medium flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              Secure
+            </span>
           </div>
         </div>
       </div>

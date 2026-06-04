@@ -420,9 +420,9 @@ export default function ChartComponent() {
   }, []);
 
   return (
-    <div className="relative w-full h-full flex bg-slate-900 border border-slate-800 rounded-lg overflow-hidden group">
+    <div className="relative w-full h-full flex overflow-hidden group">
       {isLoading && (
-        <div className="absolute top-4 right-4 bg-slate-800/80 px-3 py-1.5 rounded text-xs text-slate-300 font-medium z-20">
+        <div className="absolute top-4 right-4 glass-panel px-3 py-1.5 rounded-xl text-xs text-slate-300 font-medium z-20">
           Loading...
         </div>
       )}

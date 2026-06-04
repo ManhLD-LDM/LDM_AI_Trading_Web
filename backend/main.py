@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from database import connect_to_mongo, close_mongo_connection, db, get_database
 from binance_api import get_historical_klines
-from kronos_onnx import KronosInference
+from kronos_onnx import ModelEnsemble
 from agents import TechnicalAgent, SentimentAgent, TraderAgent
 from auth import (
     UserCreate, UserInDB, Token,
@@ -59,7 +59,7 @@ class ConnectionManager:
             self.disconnect(dead)
 
 manager = ConnectionManager()
-kronos_model = KronosInference()
+ensemble_model = ModelEnsemble()
 tech_agent = TechnicalAgent()
 sentiment_agent = SentimentAgent()
 trader_agent = TraderAgent()
@@ -207,22 +207,23 @@ async def websocket_endpoint(websocket: WebSocket):
 class AnalysisRequest(BaseModel):
     symbol: str
     interval: str
+    model_type: str = "lstm"
 
 @app.post("/api/analysis/run")
 async def trigger_analysis(req: AnalysisRequest):
     # Đẩy tác vụ chạy nền (async) để không block giao diện
-    asyncio.create_task(run_analysis_for_symbol(req.symbol, req.interval))
-    return {"status": "success", "message": f"Started analysis for {req.symbol} on {req.interval} timeframe."}
+    asyncio.create_task(run_analysis_for_symbol(req.symbol, req.interval, req.model_type))
+    return {"status": "success", "message": f"Started analysis for {req.symbol} on {req.interval} using {req.model_type}."}
 
-async def run_analysis_for_symbol(symbol: str, interval: str):
+async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = "lstm"):
     try:
         # 1. Fetch market data
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Fetching latest market data for {interval}..."}))
         history_data = await get_historical_klines(symbol=symbol, interval=interval, limit=512)
         
-        # 2. Run Kronos
-        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running Kronos Inference..."}))
-        kronos_prediction = kronos_model.predict(history_data)
+        # 2. Run Model Ensemble
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running {model_type.upper()} Inference..."}))
+        kronos_prediction = ensemble_model.predict(history_data, model_type)
         await manager.broadcast(json.dumps({
             "type": "ai_log", 
             "agent_name": "Kronos", 

@@ -35,8 +35,18 @@ export default function Toolbar() {
 
   const pairRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<HTMLDivElement>(null);
+  const modelRef = useRef<HTMLDivElement>(null);
 
+  const [modelType, setModelType] = useState('lstm');
+  const [isModelOpen, setIsModelOpen] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  const ALL_MODELS = [
+    { label: '🔵 LSTM', value: 'lstm' },
+    { label: '🟢 XGBoost', value: 'xgboost' },
+    { label: '🟣 Transformer', value: 'transformer' },
+    { label: '🟡 TCN', value: 'tcn' },
+  ];
 
   const handleAnalyzeAI = async () => {
     setIsAnalyzing(true);
@@ -49,7 +59,7 @@ export default function Toolbar() {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ symbol: pair, interval: interval })
+        body: JSON.stringify({ symbol: pair, interval: interval, model_type: modelType })
       });
     } catch (err) {
       console.error("Failed to trigger AI analysis", err);
@@ -75,6 +85,7 @@ export default function Toolbar() {
     const handleClickOutside = (event: MouseEvent) => {
       if (pairRef.current && !pairRef.current.contains(event.target as Node)) setIsPairOpen(false);
       if (intervalRef.current && !intervalRef.current.contains(event.target as Node)) setIsIntervalOpen(false);
+      if (modelRef.current && !modelRef.current.contains(event.target as Node)) setIsModelOpen(false);
     };
     
     document.addEventListener('mousedown', handleClickOutside);
@@ -156,6 +167,42 @@ export default function Toolbar() {
                   }`}
                 >
                   {inv.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="h-4 w-[1px] bg-slate-700 shrink-0"></div>
+
+      {/* Model Selector */}
+      <div className="relative shrink-0" ref={modelRef}>
+        <button 
+          onClick={() => setIsModelOpen(!isModelOpen)}
+          className="flex items-center gap-2 bg-slate-900 border border-slate-700 text-slate-200 text-sm font-medium rounded-md px-3 py-1.5 hover:bg-slate-800 transition-colors justify-between min-w-[130px]"
+        >
+          {ALL_MODELS.find(m => m.value === modelType)?.label || modelType}
+          <ChevronDown size={14} className="text-slate-400" />
+        </button>
+        
+        {isModelOpen && (
+          <div className="absolute top-full left-0 mt-1 w-40 bg-slate-800 border border-slate-700 rounded-md shadow-xl overflow-hidden flex flex-col z-50">
+            <div className="p-2 border-b border-slate-700 bg-slate-900/50 text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              AI Core Engine
+            </div>
+            <div className="flex flex-col p-1">
+              {ALL_MODELS.map((mod) => (
+                <button
+                  key={mod.value}
+                  onClick={() => { setModelType(mod.value); setIsModelOpen(false); }}
+                  className={`px-3 py-2 text-sm text-left transition-colors rounded-md ${
+                    modelType === mod.value
+                      ? 'bg-emerald-500/20 text-emerald-400 font-medium'
+                      : 'bg-transparent text-slate-300 hover:bg-slate-700 hover:text-slate-200'
+                  }`}
+                >
+                  {mod.label}
                 </button>
               ))}
             </div>

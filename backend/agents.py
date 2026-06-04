@@ -23,7 +23,7 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
         prompt = f"{system_prompt}\n\nUSER INPUT:\n{user_prompt}"
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model='gemini-2.5-flash-lite',
+            model='gemma-4-31b-it',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type=response_mime_type,
@@ -60,12 +60,22 @@ class SentimentAgent:
 
 class TraderAgent:
     async def decide(self, tech_analysis: str, sentiment_analysis: str, interval: str) -> dict:
-        sys_prompt = f"Bạn là Master Trader giao dịch trên khung thời gian {interval}. Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. Khung thời gian nhỏ (1m, 5m, 15m) thì ưu tiên lướt sóng, khung thời gian lớn (1h, 4h, 1d) thì đánh theo xu hướng. Trả về ĐÚNG MỘT object JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100)."
+        sys_prompt = f"Bạn là Master Trader giao dịch trên khung thời gian {interval}. Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. Khung thời gian nhỏ (1m, 5m, 15m) thì ưu tiên lướt sóng, khung thời gian lớn (1h, 4h, 1d) thì đánh theo xu hướng. Trả về ĐÚNG MỘT object JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100). KHÔNG TRẢ VỀ BẤT KỲ VĂN BẢN NÀO KHÁC NGOÀI JSON."
         user_prompt = f"Khung thời gian giao dịch: {interval}\n\nKỹ thuật:\n{tech_analysis}\n\nTâm lý:\n{sentiment_analysis}"
-        response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="application/json")
+        # Lỗi 500 xuất hiện do Gemma không hỗ trợ response_mime_type="application/json"
+        response_text = await call_agent(sys_prompt, user_prompt)
         
         try:
-            decision = json.loads(response_text)
+            # Xử lý chuỗi JSON phòng trường hợp Gemma trả về ```json ... ``` markdown
+            clean_text = response_text.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            if clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+            
+            decision = json.loads(clean_text.strip())
             return {
                 "action": decision.get("action", "HOLD").upper(),
                 "reason": decision.get("reason", "No reason provided"),

@@ -230,9 +230,10 @@ async def run_analysis_for_symbol(symbol: str, interval: str):
         }))
 
         # 3. Agents analysis (concurrently)
+        recent_candles = history_data[-50:] if len(history_data) >= 50 else history_data
         current_price = history_data[-1][3] # Close price of the last candle
         
-        tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, current_price))
+        tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, recent_candles, interval))
         sent_task = asyncio.create_task(sentiment_agent.analyze(symbol))
         
         tech_analysis, sent_analysis = await asyncio.gather(tech_task, sent_task)
@@ -241,7 +242,7 @@ async def run_analysis_for_symbol(symbol: str, interval: str):
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Sentiment Agent", "thought": f"[{symbol}] Sentiment analysis completed."}))
 
         # 4. Final Decision
-        decision = await trader_agent.decide(tech_analysis, sent_analysis)
+        decision = await trader_agent.decide(tech_analysis, sent_analysis, interval)
         
         await manager.broadcast(json.dumps({
             "type": "ai_log", 

@@ -25,13 +25,22 @@ class KronosInference:
         """
         if self.session is None:
             # Fallback mock mode nếu chưa có file ONNX
+            import random
+            if isinstance(history_data, (list, np.ndarray)) and len(history_data) > 0:
+                first_close = float(history_data[0][3])
+                last_close = float(history_data[-1][3])
+                trend = "up" if last_close >= first_close else "down"
+                confidence = round(random.uniform(60.0, 95.0), 2)
+            else:
+                trend = "up"
+                confidence = 75.5
+                
             return {
                 "status": "mock",
-                "trend": "up",
-                "confidence": 75.5,
-                "reason": "Model not loaded. Using mock trend."
+                "trend": trend,
+                "confidence": confidence,
+                "reason": f"Model not loaded. Using dynamic mock trend ({trend})."
             }
-
         try:
             # Tiền xử lý data giống như mô hình gốc yêu cầu
             # Vd: scale, normalize... (Giả định mô hình nhận đầu vào chuẩn)

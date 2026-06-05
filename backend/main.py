@@ -223,7 +223,7 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
         
         # 2. Run Model Ensemble
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running {model_type.upper()} Inference..."}))
-        kronos_prediction = ensemble_model.predict(history_data, model_type)
+        kronos_prediction = ensemble_model.predict(history_data, model_type, symbol, interval)
         await manager.broadcast(json.dumps({
             "type": "ai_log", 
             "agent_name": "Kronos", 

@@ -445,15 +445,39 @@ export default function ChartComponent() {
   }, [pair, interval]);
 
   // 3. Handle Markers
-  const markersPluginRef = useRef<any>(null);
   useEffect(() => {
-    if (seriesRef.current) {
-      if (!markersPluginRef.current) {
-        markersPluginRef.current = createSeriesMarkers(seriesRef.current);
+    if (seriesRef.current && chartData.length > 0) {
+      if (signals.length === 0) {
+        seriesRef.current.setMarkers([]);
+        return;
       }
-      markersPluginRef.current.setMarkers(signals);
+      
+      // Snap signal times to the closest valid candle time in the current timeframe
+      const validMarkers = signals.map(sig => {
+        let closestTime = chartData[0].time;
+        for (let i = 0; i < chartData.length; i++) {
+          if (chartData[i].time <= sig.time) {
+            closestTime = chartData[i].time;
+          } else {
+            break;
+          }
+        }
+        return { ...sig, time: closestTime };
+      });
+      
+      // Lightweight charts requires markers to be sorted by time
+      validMarkers.sort((a, b) => (a.time as number) - (b.time as number));
+      
+      // Deduplicate markers at the same exact time (Lightweight Charts constraint)
+      const uniqueMarkers = validMarkers.filter((v, i, a) => i === 0 || v.time !== a[i - 1].time);
+
+      try {
+        seriesRef.current.setMarkers(uniqueMarkers);
+      } catch (e) {
+        console.error("Failed to set markers:", e);
+      }
     }
-  }, [signals]);
+  }, [signals, chartData]);
 
   // 4. Handle Indicators
   useEffect(() => {

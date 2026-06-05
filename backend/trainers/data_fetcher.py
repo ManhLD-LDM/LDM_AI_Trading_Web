@@ -77,7 +77,7 @@ if __name__ == "__main__":
     
     async def fetch_all():
         for sym in symbols:
-            print(f"\n{'='*50}\nBắt đầu tải {sym}\n{'='*50}")
+            print(f"\n{'='*50}\nStarting download {sym}\n{'='*50}")
             await fetch_historical_klines(symbol=sym, interval="1m", target_candles=target)
             
     asyncio.run(fetch_all())

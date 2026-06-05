@@ -5,7 +5,7 @@ echo ===================================================
 echo.
 
 echo [1/2] Dang khoi dong FastAPI Backend (Port 8000)...
-start "LDM_Backend_Prod" cmd /k "cd backend && call venv\Scripts\activate.bat && uvicorn main:app --host 0.0.0.0 --port 8000"
+start "LDM_Backend_Prod" cmd /k "cd backend && call .venv\Scripts\activate.bat && uvicorn main:app --host 0.0.0.0 --port 8000"
 
 echo [2/2] Dang Build va Khoi dong Next.js Frontend (Port 3000)...
 start "LDM_Frontend_Prod" cmd /k "cd frontend && npm install && npm run build && npm start"

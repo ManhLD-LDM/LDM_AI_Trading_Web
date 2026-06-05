@@ -77,8 +77,8 @@ def prepare_mtf_data(csv_path="BTCUSDT_1m_raw.csv", target_tf="15m", num_chunks=
     print("Resampling to Higher Timeframes (5m, 15m, 1h, 4h)...")
     df_5m = resample_and_shift(df_1m, '5min')
     df_15m = resample_and_shift(df_1m, '15min')
-    df_1h = resample_and_shift(df_1m, '1H')
-    df_4h = resample_and_shift(df_1m, '4H')
+    df_1h = resample_and_shift(df_1m, '1h')
+    df_4h = resample_and_shift(df_1m, '4h')
     
     print("Merging features...")
     df_merged = df_1m.copy()

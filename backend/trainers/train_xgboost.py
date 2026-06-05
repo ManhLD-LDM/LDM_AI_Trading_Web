@@ -15,7 +15,7 @@ ASSET_CLASSES = {
 }
 
 def train_for_class(class_name, symbols):
-    print(f"\n{'='*50}\nBắt đầu Training XGBoost cho Class: {class_name.upper()}\n{'='*50}")
+    print(f"\n{'='*50}\nStarting Training XGBoost for Class: {class_name.upper()}\n{'='*50}")
     
     all_X_train_chunks, all_y_train_chunks = [], []
     all_X_val_chunks, all_y_val_chunks = [], []

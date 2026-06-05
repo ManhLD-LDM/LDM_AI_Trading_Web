@@ -86,17 +86,71 @@ class ModelEnsemble:
             }
 
         try:
-            # TODO: MTF Live inference requires fetching 5 timeframes from Binance simultaneously.
-            # Currently we return a mock success to let the UI work while models are training.
-            import random
-            trend = random.choice(["up", "down"])
-            confidence = round(random.uniform(70.0, 98.0), 2)
+            import numpy as np
+            import pandas as pd
+            import pandas_ta as ta
+
+            if isinstance(history_data, (list, np.ndarray)) and len(history_data) > 0:
+                df = pd.DataFrame(history_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+                df.set_index('timestamp', inplace=True)
+                
+                # Tính toán cơ bản 12 indicators
+                df.ta.ema(length=20, append=True)
+                df.ta.ema(length=50, append=True)
+                df.ta.rsi(length=14, append=True)
+                df.ta.macd(fast=12, slow=26, signal=9, append=True)
+                df.ta.bbands(length=20, std=2, append=True)
+                df.ta.atr(length=14, append=True)
+                
+                df.bfill(inplace=True)
+                df.fillna(0, inplace=True)
+                
+                # Lấy 60 nến cuối cùng
+                recent_df = df.tail(60)
+                if len(recent_df) < 60:
+                    # Pad if not enough
+                    pad_len = 60 - len(recent_df)
+                    pad_df = pd.DataFrame([recent_df.iloc[0].values]*pad_len, columns=recent_df.columns)
+                    recent_df = pd.concat([pad_df, recent_df], ignore_index=True)
+                
+                features = recent_df.values # shape: (60, num_features)
+                num_features = features.shape[1] # Thường là 5 OHLCV + 12 ind = 17
+                
+                # Scale rough approximation (min-max)
+                features = (features - np.min(features, axis=0)) / (np.max(features, axis=0) - np.min(features, axis=0) + 1e-8)
+                
+                # Fill to 65 features by repeating (mocking MTF)
+                full_features = np.zeros((60, 65), dtype=np.float32)
+                for i in range(65):
+                    full_features[:, i] = features[:, i % num_features]
+                
+                last_close = float(df['close'].iloc[-1])
+            else:
+                full_features = np.zeros((60, 65), dtype=np.float32)
+                last_close = 1.0
+
+            if model_type == "xgboost":
+                import xgboost as xgb
+                X_xgb = full_features.reshape(1, 60 * 65)
+                dmatrix = xgb.DMatrix(X_xgb)
+                pred = model.predict(dmatrix)[0]
+                prob = float(pred)
+            else:
+                input_name = model.get_inputs()[0].name
+                X_dl = full_features.reshape(1, 60, 65)
+                ort_outs = model.run(None, {input_name: X_dl})
+                pred = ort_outs[0][0]
+                prob = float(pred[1]) if len(pred) > 1 else float(pred[0])
+
+            trend = "up" if prob >= 0.5 else "down"
+            confidence = round(max(prob, 1 - prob) * 100, 2)
             
             return {
                 "status": "success",
                 "trend": trend,
                 "confidence": confidence,
-                "reason": f"Predicted using {model_type.upper()} model for {symbol} (MTF Live logic pending integration)."
+                "reason": f"Predicted using {model_type.upper()} model for {symbol} (Deterministic MTF Fallback)."
             }
         except Exception as e:
             print(f"Prediction error with {model_type}: {e}")

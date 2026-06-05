@@ -16,7 +16,7 @@ ASSET_CLASSES = {
 }
 
 def train_for_class(class_name, symbols):
-    print(f"\n{'='*50}\nBắt đầu Training Deep Learning cho Class: {class_name.upper()}\n{'='*50}")
+    print(f"\n{'='*50}\nStarting Training Deep Learning for Class: {class_name.upper()}\n{'='*50}")
     
     all_X_train_chunks, all_y_train_chunks = [], []
     all_X_val_chunks, all_y_val_chunks = [], []
@@ -54,41 +54,67 @@ def train_for_class(class_name, symbols):
     input_size = len(feature_cols_ref)
     SEQ_LENGTH = 60
     
-    def chunks_to_seq(X_chunks, y_chunks):
-        X_seq_all, y_seq_all = [], []
-        for X, y in zip(X_chunks, y_chunks):
-            X_s, y_s = create_sequences(X, y, seq_length=SEQ_LENGTH)
-            if len(X_s) > 0:
-                X_seq_all.append(X_s)
-                y_seq_all.append(y_s)
-        if len(X_seq_all) == 0:
-            return np.array([]), np.array([])
-        return np.vstack(X_seq_all), np.concatenate(y_seq_all)
+    from torch.utils.data import Dataset, DataLoader
+    import time
+    
+    class ChunkedSequenceDataset(Dataset):
+        def __init__(self, X_chunks, y_chunks, seq_length=60):
+            self.seq_length = seq_length
+            self.X_chunks = [torch.tensor(x, dtype=torch.float32) for x in X_chunks]
+            self.y_chunks = [torch.tensor(y, dtype=torch.float32).unsqueeze(1) for y in y_chunks]
+            
+            self.chunk_offsets = []
+            self.chunk_lengths = []
+            total_len = 0
+            for x in self.X_chunks:
+                valid_len = max(0, len(x) - seq_length)
+                self.chunk_lengths.append(valid_len)
+                self.chunk_offsets.append(total_len)
+                total_len += valid_len
+                
+            self.total_length = total_len
+            
+        def __len__(self):
+            return self.total_length
+            
+        def __getitem__(self, idx):
+            for i in range(len(self.chunk_offsets)-1, -1, -1):
+                if idx >= self.chunk_offsets[i]:
+                    chunk_idx = i
+                    local_idx = idx - self.chunk_offsets[i]
+                    break
+                    
+            X = self.X_chunks[chunk_idx][local_idx : local_idx + self.seq_length]
+            y = self.y_chunks[chunk_idx][local_idx + self.seq_length]
+            return X, y
 
-    X_train, y_train = chunks_to_seq(all_X_train_chunks, all_y_train_chunks)
-    X_val, y_val = chunks_to_seq(all_X_val_chunks, all_y_val_chunks)
-    X_test, y_test = chunks_to_seq(all_X_test_chunks, all_y_test_chunks)
+    # Limit CPU usage to leave room for other tasks
+    torch.set_num_threads(8)
     
-    # Convert to PyTorch Tensors
-    X_train_t = torch.tensor(X_train, dtype=torch.float32)
-    y_train_t = torch.tensor(y_train, dtype=torch.float32).unsqueeze(1)
+    # Setup GPU device if available
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
+    # Use the memory-efficient Dataset (NO data duplication)
+    train_dataset = ChunkedSequenceDataset(all_X_train_chunks, all_y_train_chunks, SEQ_LENGTH)
+    train_loader = DataLoader(train_dataset, batch_size=2048, shuffle=True, pin_memory=True if device.type=='cuda' else False)
     
-    X_val_t = torch.tensor(X_val, dtype=torch.float32)
-    y_val_t = torch.tensor(y_val, dtype=torch.float32).unsqueeze(1)
+    val_dataset = ChunkedSequenceDataset(all_X_val_chunks, all_y_val_chunks, SEQ_LENGTH)
+    val_loader = DataLoader(val_dataset, batch_size=2048, shuffle=False, pin_memory=True if device.type=='cuda' else False)
     
-    X_test_t = torch.tensor(X_test, dtype=torch.float32)
-    y_test_t = torch.tensor(y_test, dtype=torch.float32).unsqueeze(1)
+    test_dataset = ChunkedSequenceDataset(all_X_test_chunks, all_y_test_chunks, SEQ_LENGTH)
+    test_loader = DataLoader(test_dataset, batch_size=2048, shuffle=False)
     
     models = {
-        f"lstm_{class_name}.onnx": LSTMModel(input_size),
-        f"tcn_{class_name}.onnx": TCNModel(input_size),
-        f"transformer_{class_name}.onnx": TransformerModel(input_size)
+        f"lstm_{class_name}.onnx": LSTMModel(input_size).to(device),
+        f"tcn_{class_name}.onnx": TCNModel(input_size).to(device),
+        f"transformer_{class_name}.onnx": TransformerModel(input_size).to(device)
     }
     
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     
     for name, model in models.items():
-        print(f"Training {name}...")
+        print(f"Training {name} on {device}...")
         optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
         criterion = nn.BCELoss()
         
@@ -98,42 +124,73 @@ def train_for_class(class_name, symbols):
         
         for epoch in range(100):
             model.train()
-            optimizer.zero_grad()
-            output = model(X_train_t)
-            loss = criterion(output, y_train_t)
-            loss.backward()
-            optimizer.step()
+            train_loss = 0.0
+            for batch_X, batch_y in train_loader:
+                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                optimizer.zero_grad()
+                output = model(batch_X)
+                loss = criterion(output, batch_y)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item() * batch_X.size(0)
+                
+                # Sleep briefly to avoid 100% GPU/CPU utilization
+                time.sleep(0.01)
+            
+            train_loss /= len(train_loader.dataset)
             
             model.eval()
+            val_loss = 0.0
             with torch.no_grad():
-                val_out = model(X_val_t)
-                val_loss = criterion(val_out, y_val_t)
+                for batch_X, batch_y in val_loader:
+                    batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                    val_out = model(batch_X)
+                    loss = criterion(val_out, batch_y)
+                    val_loss += loss.item() * batch_X.size(0)
+            
+            val_loss /= len(val_loader.dataset)
                 
-            if val_loss.item() < best_val_loss:
-                best_val_loss = val_loss.item()
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
                 patience_counter = 0
                 torch.save(model.state_dict(), f"best_{name}.pt")
             else:
                 patience_counter += 1
                 
             if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}")
                 break
                 
         # Load best model for testing & export
-        model.load_state_dict(torch.load(f"best_{name}.pt"))
+        model.load_state_dict(torch.load(f"best_{name}.pt", weights_only=True))
         model.eval()
         
         with torch.no_grad():
-            test_out = model(X_test_t)
-            test_preds = (test_out > 0.5).float()
-            correct = (test_preds == y_test_t).sum().item()
-            accuracy = correct / len(y_test_t) if len(y_test_t) > 0 else 0
-            print(f">>> {name} Test Accuracy: {accuracy:.4f} <<<")
+            test_preds_list = []
+            test_true_list = []
+            for batch_X, batch_y in test_loader:
+                batch_X = batch_X.to(device)
+                test_out = model(batch_X)
+                test_preds_list.append((test_out > 0.5).float().cpu())
+                test_true_list.append(batch_y.cpu())
+            
+            if test_preds_list:
+                test_preds = torch.cat(test_preds_list)
+                test_trues = torch.cat(test_true_list)
+                correct = (test_preds == test_trues).sum().item()
+                accuracy = correct / len(test_trues) if len(test_trues) > 0 else 0
+                print(f">>> {name} Test Accuracy: {accuracy:.4f} <<<")
+            else:
+                print(f">>> {name} Test Accuracy: 0.0000 <<<")
             
         save_path = os.path.join(base_dir, name)
-        dummy_input = torch.randn(1, SEQ_LENGTH, input_size)
-        torch.onnx.export(model, dummy_input, save_path, input_names=['input'], output_names=['output'])
+        dummy_input = torch.randn(1, SEQ_LENGTH, input_size).to(device)
+        # Move model to CPU before export for generic ONNX CPU inference
+        model.to('cpu')
+        dummy_input_cpu = dummy_input.cpu()
+        torch.onnx.export(model, dummy_input_cpu, save_path, input_names=['input'], output_names=['output'])
         print(f"Exported {save_path}")
+
 
 def train_and_export():
     for class_name, symbols in ASSET_CLASSES.items():

@@ -46,16 +46,11 @@ class TechnicalAgent:
 class SentimentAgent:
     async def analyze(self, symbol: str) -> str:
         sys_prompt = "Bạn là Sentiment Analyst. Dựa vào tin tức tiêu đề, hãy đánh giá tâm lý thị trường (Bullish, Bearish hay Neutral). PHẦN ĐÁNH GIÁ PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
-        import random
-        scenarios = [
-            f"Lượng người dùng {symbol} tăng mạnh, các quỹ ETF tiếp tục mua vào.",
-            f"Thị trường lo ngại về quy định mới của SEC, dòng tiền rút khỏi {symbol}.",
-            f"Thị trường đi ngang, khối lượng giao dịch {symbol} sụt giảm chờ tin tức vĩ mô.",
-            f"Cá voi vừa chuyển một lượng lớn {symbol} lên sàn giao dịch, áp lực bán tăng.",
-            f"Bản nâng cấp mạng lưới mới của {symbol} thành công tốt đẹp, phí giao dịch giảm mạnh."
-        ]
-        news = random.choice(scenarios)
-        user_prompt = f"Tin tức gần đây về {symbol}: {news}"
+        
+        from news_analyzer import fetch_crypto_news
+        news = await fetch_crypto_news(symbol)
+        
+        user_prompt = f"Tin tức gần đây về {symbol}:\n{news}"
         return await call_agent(sys_prompt, user_prompt)
 
 class TraderAgent:

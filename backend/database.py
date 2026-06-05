@@ -28,6 +28,7 @@ async def connect_to_mongo():
         )
         print("TTL Index verified for trade_signals.")
     except Exception as e:
+        db.client = None
         print(f"CRITICAL: Could not connect to MongoDB: {e}")
         print("Warning: Backend is running without DB (Mock mode only). Please check MONGO_URI and IP Whitelist if you want to use the DB.")
 
@@ -37,4 +38,6 @@ async def close_mongo_connection():
         print("MongoDB connection closed.")
 
 def get_database():
+    if not db.client:
+        raise Exception("Database is running in Mock mode (db.client is None)")
     return db.client[DB_NAME]

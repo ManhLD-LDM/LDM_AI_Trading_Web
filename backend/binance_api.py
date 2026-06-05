@@ -1,11 +1,26 @@
 import httpx
 import numpy as np
+import time
+import asyncio
+
+# Simple in-memory TTL cache to avoid hitting Binance API too frequently
+_cache = {}
+_cache_ttl = 10 # seconds
+_cache_lock = asyncio.Lock()
 
 async def get_historical_klines(symbol: str = "BTCUSDT", interval: str = "1m", limit: int = 512):
     """
-    Kéo dữ liệu nến lịch sử từ Binance REST API.
-    Trả về numpy array phù hợp để đưa vào model Kronos.
+    Kéo dữ liệu nến lịch sử từ Binance REST API với In-Memory TTL Cache (10s).
+    Trả về numpy array.
     """
+    cache_key = f"{symbol}_{interval}_{limit}"
+    
+    async with _cache_lock:
+        if cache_key in _cache:
+            entry = _cache[cache_key]
+            if time.time() - entry['timestamp'] < _cache_ttl:
+                return entry['data']
+
     url = f"https://api.binance.com/api/v3/klines"
     params = {
         "symbol": symbol,
@@ -18,20 +33,6 @@ async def get_historical_klines(symbol: str = "BTCUSDT", interval: str = "1m", l
         response.raise_for_status()
         data = response.json()
         
-        # Binance kline format:
-        # [
-        #   [
-        #     1499040000000,      // Open time
-        #     "0.01634790",       // Open
-        #     "0.80000000",       // High
-        #     "0.01575800",       // Low
-        #     "0.01577100",       // Close
-        #     "148976.11427815",  // Volume
-        #     ...
-        #   ]
-        # ]
-        
-        # Chỉ lấy Timestamp, Open, High, Low, Close, Volume
         ohlcv = []
         for d in data:
             ohlcv.append([
@@ -43,4 +44,12 @@ async def get_historical_klines(symbol: str = "BTCUSDT", interval: str = "1m", l
                 float(d[5]), # Volume
             ])
             
-        return np.array(ohlcv, dtype=np.float32)
+        result = np.array(ohlcv, dtype=np.float32)
+        
+        async with _cache_lock:
+            _cache[cache_key] = {
+                'timestamp': time.time(),
+                'data': result
+            }
+            
+        return result

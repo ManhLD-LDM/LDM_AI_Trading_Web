@@ -46,6 +46,7 @@ export default function ChartComponent() {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const seriesMarkersRef = useRef<any>(null);
   const drawingManagerRef = useRef<DrawingManager | null>(null);
   const indicatorsSeriesRef = useRef<{ [id: string]: ISeriesApi<any> }>({});
   
@@ -126,6 +127,7 @@ export default function ChartComponent() {
       priceLineStyle: 3,
     });
     seriesRef.current = candlestickSeries;
+    seriesMarkersRef.current = createSeriesMarkers(candlestickSeries, []);
 
     // Initialize Drawing Manager
     const manager = new DrawingManager();
@@ -446,9 +448,9 @@ export default function ChartComponent() {
 
   // 3. Handle Markers
   useEffect(() => {
-    if (seriesRef.current && chartData.length > 0) {
+    if (seriesMarkersRef.current && chartData.length > 0) {
       if (signals.length === 0) {
-        seriesRef.current.setMarkers([]);
+        seriesMarkersRef.current.setMarkers([]);
         return;
       }
       
@@ -472,7 +474,7 @@ export default function ChartComponent() {
       const uniqueMarkers = validMarkers.filter((v, i, a) => i === 0 || v.time !== a[i - 1].time);
 
       try {
-        seriesRef.current.setMarkers(uniqueMarkers);
+        seriesMarkersRef.current.setMarkers(uniqueMarkers);
       } catch (e) {
         console.error("Failed to set markers:", e);
       }
@@ -482,15 +484,9 @@ export default function ChartComponent() {
   // 4. Handle Indicators
   useEffect(() => {
     if (!chartRef.current || chartData.length === 0) return;
-    
-    Object.values(indicatorsSeriesRef.current).forEach(series => {
-      if (series && chartRef.current) {
-        try {
-          chartRef.current.removeSeries(series);
-        } catch (e) {}
-      }
-    });
-    indicatorsSeriesRef.current = {};
+
+    // Track active keys to remove ones that were deleted
+    const currentActiveKeys: string[] = [];
 
     const inputData = {
       time: chartData.map(d => d.time as number),
@@ -537,16 +533,26 @@ export default function ChartComponent() {
       }
 
       def.lines.forEach(lineDef => {
-        let series: ISeriesApi<any>;
+        const seriesKey = `${ind.instanceId}_${lineDef.id}`;
+        currentActiveKeys.push(seriesKey);
+        
+        let series = indicatorsSeriesRef.current[seriesKey];
         const color = lineDef.colorParam && ind.params[lineDef.colorParam] ? ind.params[lineDef.colorParam] : lineDef.defaultColor || '#ffffff';
         
-        if (lineDef.type === 'histogram') {
-          series = chartRef.current!.addSeries(HistogramSeries, { priceScaleId });
+        if (!series) {
+            // Create series if it doesn't exist
+            if (lineDef.type === 'histogram') {
+              series = chartRef.current!.addSeries(HistogramSeries, { priceScaleId });
+            } else {
+              series = chartRef.current!.addSeries(LineSeries, { color, lineWidth: 2, priceScaleId });
+            }
+            indicatorsSeriesRef.current[seriesKey] = series;
         } else {
-          series = chartRef.current!.addSeries(LineSeries, { color, lineWidth: 2, priceScaleId });
+            // Update options if needed
+            if (lineDef.type !== 'histogram') {
+                series.applyOptions({ color });
+            }
         }
-        
-        indicatorsSeriesRef.current[`${ind.instanceId}_${lineDef.id}`] = series;
 
         const seriesData = results
           .filter(r => r[lineDef.id] !== undefined && r[lineDef.id] !== null && !Number.isNaN(r[lineDef.id]))
@@ -570,6 +576,19 @@ export default function ChartComponent() {
           }
         });
       }
+    });
+
+    // Cleanup removed indicators
+    Object.keys(indicatorsSeriesRef.current).forEach(key => {
+        if (!currentActiveKeys.includes(key)) {
+            const series = indicatorsSeriesRef.current[key];
+            if (series && chartRef.current) {
+                try {
+                    chartRef.current.removeSeries(series);
+                } catch (e) {}
+            }
+            delete indicatorsSeriesRef.current[key];
+        }
     });
 
   }, [chartData, indicators]);

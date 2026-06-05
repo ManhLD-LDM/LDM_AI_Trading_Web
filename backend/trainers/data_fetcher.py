@@ -62,7 +62,8 @@ async def fetch_historical_klines(symbol="BTCUSDT", interval="1m", target_candle
         df = df.iloc[-target_candles:]
         df.reset_index(drop=True, inplace=True)
         
-    save_dir = r"E:\myPrj\candle_data"
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    save_dir = os.getenv("DATA_DIR", os.path.join(base_dir, "candle_data"))
     os.makedirs(save_dir, exist_ok=True)
     save_path = os.path.join(save_dir, f"{symbol}_{interval}_raw.csv")
     

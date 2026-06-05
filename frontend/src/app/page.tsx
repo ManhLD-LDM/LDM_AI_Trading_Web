@@ -12,11 +12,81 @@ export default function Home() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [isAiSidebarOpen, setIsAiSidebarOpen] = useState(false);
-  const { user, logout } = useTradingStore();
+  const { user, token, logout } = useTradingStore();
+  const [settings, setSettings] = useState({
+    geminiApiKey: '',
+    binanceApiKey: '',
+    maxPositionSize: 5,
+    stopLoss: 2
+  });
+
+  const [backtestStrategy, setBacktestStrategy] = useState("MACD Crossover");
+  const [backtestPair, setBacktestPair] = useState("BTCUSDT");
+  const [backtestInterval, setBacktestInterval] = useState("1h");
+  const [isBacktesting, setIsBacktesting] = useState(false);
+  const [backtestResults, setBacktestResults] = useState<any>(null);
 
   useEffect(() => {
     setMounted(true);
-  }, []);
+    if (user?.preferences?.settings) {
+      setSettings(user.preferences.settings);
+    }
+  }, [user]);
+
+  const handleSaveSettings = async () => {
+    if (!token) return;
+    const host = window.location.hostname;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
+    try {
+      const res = await fetch(`${API_URL}/api/user/preferences`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ settings })
+      });
+      if (res.ok) alert('Settings saved successfully!');
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRunBacktest = async () => {
+    if (!token) {
+        setIsAuthModalOpen(true);
+        return;
+    }
+    setIsBacktesting(true);
+    setBacktestResults(null);
+    const host = window.location.hostname;
+    const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
+    try {
+      const res = await fetch(`${API_URL}/api/backtest`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+            strategy: backtestStrategy,
+            symbol: backtestPair,
+            interval: backtestInterval
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.status === "success") {
+          setBacktestResults(data.results);
+      } else {
+          alert(data.message || 'Error running backtest');
+      }
+    } catch (e) {
+      console.error(e);
+      alert('Error running backtest');
+    } finally {
+      setIsBacktesting(false);
+    }
+  };
 
   const handleTabChange = (tab: 'live' | 'backtest' | 'settings') => {
     if ((tab === 'backtest' || tab === 'settings') && !user) {
@@ -125,7 +195,7 @@ export default function Home() {
               <div className="space-y-6">
                 <div className="flex flex-col gap-2">
                   <label className="text-xs uppercase tracking-wider font-semibold text-slate-400">Select Bot / Strategy</label>
-                  <select className="bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
+                  <select value={backtestStrategy} onChange={e => setBacktestStrategy(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
                     <option className="bg-slate-900">Kronos + Tech + Sentiment (Default)</option>
                     <option className="bg-slate-900">MACD Crossover</option>
                     <option className="bg-slate-900">RSI Mean Reversion</option>
@@ -135,7 +205,7 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-6">
                   <div className="flex flex-col gap-2">
                     <label className="text-xs uppercase tracking-wider font-semibold text-slate-400">Pair</label>
-                    <select className="bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
+                    <select value={backtestPair} onChange={e => setBacktestPair(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
                       <option className="bg-slate-900">BTCUSDT</option>
                       <option className="bg-slate-900">ETHUSDT</option>
                       <option className="bg-slate-900">SOLUSDT</option>
@@ -143,7 +213,7 @@ export default function Home() {
                   </div>
                   <div className="flex flex-col gap-2">
                     <label className="text-xs uppercase tracking-wider font-semibold text-slate-400">Timeframe</label>
-                    <select className="bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
+                    <select value={backtestInterval} onChange={e => setBacktestInterval(e.target.value)} className="bg-white/5 border border-white/10 rounded-lg p-3 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
                       <option className="bg-slate-900">1h</option>
                       <option className="bg-slate-900">4h</option>
                       <option className="bg-slate-900">1d</option>
@@ -151,9 +221,31 @@ export default function Home() {
                   </div>
                 </div>
                 
-                <button className="mt-8 w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-semibold py-3 rounded-lg transition-all active:scale-[0.98] shadow-[0_4px_15px_rgba(251,191,36,0.25)]">
-                  Run Backtest
+                <button onClick={handleRunBacktest} disabled={isBacktesting} className="mt-8 w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-semibold py-3 rounded-lg transition-all active:scale-[0.98] shadow-[0_4px_15px_rgba(251,191,36,0.25)]">
+                  {isBacktesting ? 'Running...' : 'Run Backtest'}
                 </button>
+                
+                {backtestResults && (
+                  <div className="mt-8 pt-8 border-t border-white/5">
+                    <h3 className="text-lg font-semibold text-amber-400 mb-4">Results</h3>
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="bg-white/5 p-4 rounded-lg">
+                        <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">Final Equity</div>
+                        <div className="text-xl font-medium text-slate-200">${backtestResults.final_equity}</div>
+                      </div>
+                      <div className="bg-white/5 p-4 rounded-lg">
+                        <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">ROI</div>
+                        <div className={`text-xl font-medium ${backtestResults.roi_percent >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {backtestResults.roi_percent}%
+                        </div>
+                      </div>
+                      <div className="bg-white/5 p-4 rounded-lg">
+                        <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">Total Trades</div>
+                        <div className="text-xl font-medium text-slate-200">{backtestResults.total_trades}</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -170,11 +262,11 @@ export default function Home() {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1.5">Gemini API Key</label>
-                      <input type="password" placeholder="AIzaSy..." className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
+                      <input type="password" value={settings.geminiApiKey} onChange={(e) => setSettings({...settings, geminiApiKey: e.target.value})} placeholder="AIzaSy..." className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1.5">Binance API Key (Optional)</label>
-                      <input type="password" placeholder="..." className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
+                      <input type="password" value={settings.binanceApiKey} onChange={(e) => setSettings({...settings, binanceApiKey: e.target.value})} placeholder="..." className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
                     </div>
                   </div>
                 </div>
@@ -184,16 +276,16 @@ export default function Home() {
                   <div className="space-y-4">
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1.5">Max Position Size (%)</label>
-                      <input type="number" defaultValue="5" className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
+                      <input type="number" value={settings.maxPositionSize} onChange={(e) => setSettings({...settings, maxPositionSize: Number(e.target.value)})} className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-500 mb-1.5">Stop Loss (%)</label>
-                      <input type="number" defaultValue="2" className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
+                      <input type="number" value={settings.stopLoss} onChange={(e) => setSettings({...settings, stopLoss: Number(e.target.value)})} className="w-full bg-white/5 border border-white/10 rounded-lg p-2.5 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
                     </div>
                   </div>
                 </div>
                 
-                <button className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-semibold py-3 px-8 rounded-lg transition-all active:scale-[0.98] shadow-[0_4px_15px_rgba(251,191,36,0.25)]">
+                <button onClick={handleSaveSettings} className="bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-semibold py-3 px-8 rounded-lg transition-all active:scale-[0.98] shadow-[0_4px_15px_rgba(251,191,36,0.25)]">
                   Save Settings
                 </button>
               </div>

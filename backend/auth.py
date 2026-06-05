@@ -1,18 +1,24 @@
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from passlib.context import CryptContext
 from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", "fallback_secret_key_for_dev_only_123")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
+SECRET_KEY = os.getenv("JWT_SECRET_KEY")
+if not SECRET_KEY or SECRET_KEY == "generate_a_secure_random_key_here":
+    print("WARNING: No JWT_SECRET_KEY found. Using a static fallback key. Set JWT_SECRET_KEY in production.")
+    SECRET_KEY = "static_fallback_secret_key_for_development_purposes_only_replace_in_prod"
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+ALGORITHM = "HS256"
+try:
+    ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+except ValueError:
+    ACCESS_TOKEN_EXPIRE_MINUTES = 60
+
+# passlib removed
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 class Token(BaseModel):
@@ -28,14 +34,21 @@ class UserInDB(BaseModel):
     preferences: dict = {}
 
 class UserCreate(BaseModel):
-    email: str
-    password: str
+    email: EmailStr
+    password: str = Field(..., min_length=8)
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+import bcrypt
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        return False
+
+def get_password_hash(password: str) -> str:
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+    return hashed.decode('utf-8')
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()

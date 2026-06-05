@@ -18,13 +18,41 @@ from auth import (
     verify_password, get_password_hash, create_access_token, get_current_user,
     ACCESS_TOKEN_EXPIRE_MINUTES, timedelta
 )
+
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from fastapi import Request, Security
+from fastapi.security import APIKeyHeader
+
+from routers import backtest, paper
+
+limiter = Limiter(key_func=get_remote_address)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await connect_to_mongo()
+    
+    # Start analysis workers
+    workers = []
+    for _ in range(WORKER_COUNT):
+        workers.append(asyncio.create_task(analysis_worker()))
+        
     yield
+    
+    # Shutdown workers
+    for w in workers:
+        w.cancel()
     await close_mongo_connection()
 
 app = FastAPI(title="LDM AI Trading Backend", lifespan=lifespan)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
+app.include_router(paper.router, prefix="/api/paper", tags=["Paper Trading"])
 
 origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
 
@@ -96,7 +124,8 @@ async def register(user: UserCreate):
     return {"access_token": access_token, "token_type": "bearer"}
 
 @app.post("/api/auth/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+@limiter.limit("5/minute")
+async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
     if not db.client:
         raise HTTPException(status_code=503, detail="Database not available (Mock mode)")
     collection = get_database()["users"]
@@ -124,16 +153,27 @@ async def read_users_me(current_user_email: str = Depends(get_current_user)):
         raise HTTPException(status_code=404, detail="User not found")
     return {"email": user["email"], "preferences": user.get("preferences", {})}
 
+class UserPreferences(BaseModel):
+    theme: str | None = None
+    chartType: str | None = None
+    indicators: list | None = None
+    favoritePairs: list | None = None
+    interval: str | None = None
+    
+    class Config:
+        extra = "ignore"
+
 @app.put("/api/user/preferences")
-async def update_preferences(preferences: dict, current_user_email: str = Depends(get_current_user)):
+async def update_preferences(preferences: UserPreferences, current_user_email: str = Depends(get_current_user)):
+    prefs_dict = preferences.dict(exclude_unset=True)
     if not db.client:
-        return {"status": "success", "preferences": preferences, "mock": True}
+        return {"status": "success", "preferences": prefs_dict, "mock": True}
     collection = get_database()["users"]
     await collection.update_one(
         {"email": current_user_email},
-        {"$set": {"preferences": preferences}}
+        {"$set": {"preferences": prefs_dict}}
     )
-    return {"status": "success", "preferences": preferences}
+    return {"status": "success", "preferences": prefs_dict}
 
 class WebhookSignal(BaseModel):
     bot_name: str
@@ -143,8 +183,13 @@ class WebhookSignal(BaseModel):
     reason: str
     confidence: int = 100
 
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 @app.post("/api/webhook/signals")
-async def receive_webhook_signal(signal: WebhookSignal):
+async def receive_webhook_signal(signal: WebhookSignal, api_key: str = Security(api_key_header)):
+    expected_key = os.getenv("WEBHOOK_API_KEY")
+    if not expected_key or api_key != expected_key:
+        raise HTTPException(status_code=403, detail="Invalid or missing API Key")
     # Broadcast to frontend
     await manager.broadcast(json.dumps({
         "type": "ai_log",
@@ -196,7 +241,20 @@ async def save_drawings(symbol: str, drawing: DrawingData, interval: str = "1m",
     return {"status": "success"}
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, token: str = None):
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+    try:
+        from auth import SECRET_KEY, ALGORITHM
+        from jose import jwt, JWTError
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if not payload.get("sub"):
+            raise JWTError()
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
     await manager.connect(websocket)
     try:
         while True:
@@ -209,11 +267,42 @@ class AnalysisRequest(BaseModel):
     interval: str
     model_type: str = "lstm"
 
+analysis_queue = asyncio.Queue()
+WORKER_COUNT = 5
+
+async def analysis_worker():
+    while True:
+        try:
+            req = await analysis_queue.get()
+            symbol, interval, model_type = req
+            await run_analysis_with_recovery(symbol, interval, model_type)
+        except Exception as e:
+            print(f"Worker error: {e}")
+        finally:
+            analysis_queue.task_done()
+
 @app.post("/api/analysis/run")
-async def trigger_analysis(req: AnalysisRequest):
-    # Đẩy tác vụ chạy nền (async) để không block giao diện
-    asyncio.create_task(run_analysis_for_symbol(req.symbol, req.interval, req.model_type))
-    return {"status": "success", "message": f"Started analysis for {req.symbol} on {req.interval} using {req.model_type}."}
+@limiter.limit("10/minute")
+async def trigger_analysis(request: Request, req: AnalysisRequest, current_user_email: str = Depends(get_current_user)):
+    # Đẩy tác vụ vào hàng đợi (Queue)
+    await analysis_queue.put((req.symbol, req.interval, req.model_type))
+    return {"status": "success", "message": f"Queued analysis for {req.symbol} on {req.interval} using {req.model_type}."}
+
+async def run_analysis_with_recovery(symbol: str, interval: str, model_type: str):
+    # Lặp lại 3 lần nếu có lỗi
+    for attempt in range(3):
+            try:
+                await run_analysis_for_symbol(symbol, interval, model_type)
+                break
+            except Exception as e:
+                print(f"[{symbol}] Attempt {attempt+1} failed: {e}")
+                if attempt == 2:
+                    await manager.broadcast(json.dumps({
+                        "type": "error",
+                        "agent_name": "System",
+                        "message": f"Analysis failed for {symbol}: {str(e)}"
+                    }))
+                await asyncio.sleep(2)
 
 async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = "lstm"):
     try:

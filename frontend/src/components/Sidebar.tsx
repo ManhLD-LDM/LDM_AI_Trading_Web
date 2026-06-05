@@ -24,12 +24,15 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const [events, setEvents] = useState<AIEvent[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   
-  const { pair, interval, addSignal } = useTradingStore();
+  const { pair, interval, addSignal, token } = useTradingStore();
 
   useEffect(() => {
+    if (!token) return; // Don't connect without auth
+    
     // Connect to backend WebSocket
     const host = window.location.hostname;
-    const ws = new WebSocket(`ws://${host}:8000/ws`);
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `ws://${host}:8000/ws`;
+    const ws = new WebSocket(`${wsUrl}?token=${token}`);
     
     ws.onmessage = (event) => {
       try {
@@ -143,6 +146,10 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           <div className="flex justify-between items-center text-xs">
             <span className="text-slate-400">Target Pair</span>
             <span className="text-slate-200 font-medium">{pair}</span>
+          </div>
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-slate-400">Active Brain</span>
+            <span className="text-amber-400 font-medium">{['PAXGUSDT'].includes(pair) ? 'Commodities' : 'Crypto'}</span>
           </div>
           <div className="flex justify-between items-center text-xs">
             <span className="text-slate-400">Timeframe</span>

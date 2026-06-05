@@ -78,23 +78,6 @@ export default function ChartComponent() {
         volume: parseFloat(d[5]),
       }));
 
-      if (!endTime && formattedData.length > 0) {
-        const value = parseInt(interval);
-        const unit = interval.slice(-1);
-        let intervalSeconds = 60;
-        if (unit === 'm') intervalSeconds = value * 60;
-        else if (unit === 'h') intervalSeconds = value * 3600;
-        else if (unit === 'd') intervalSeconds = value * 86400;
-        else if (unit === 'w') intervalSeconds = value * 604800;
-        else if (unit === 'M') intervalSeconds = value * 2592000;
-
-        const lastTime = formattedData[formattedData.length - 1].time;
-        const futureData = [];
-        for (let i = 1; i <= 150; i++) {
-          futureData.push({ time: (lastTime + i * intervalSeconds) as UTCTimestamp });
-        }
-        return [...formattedData, ...futureData];
-      }
       return formattedData;
     } catch (err) {
       console.error("Failed to fetch klines", err);
@@ -335,13 +318,6 @@ export default function ChartComponent() {
     const containerEl = chartContainerRef.current;
     containerEl?.addEventListener('mousedown', handleContainerMouseDown);
 
-    const handleResize = () => {
-      if (chartContainerRef.current) {
-        chart.applyOptions({ width: chartContainerRef.current.clientWidth });
-      }
-    };
-    window.addEventListener('resize', handleResize);
-
     // Load initial data
     isInitialLoadRef.current = true;
     
@@ -366,7 +342,9 @@ export default function ChartComponent() {
       if (!isMounted) return;
       chartDataRef.current = data;
       setChartData(data);
-      candlestickSeries.setData(data);
+      if (seriesRef.current) {
+         seriesRef.current.setData(data);
+      }
       isInitialLoadRef.current = false;
     });
 
@@ -392,7 +370,9 @@ export default function ChartComponent() {
               const uniqueData = newData.filter((v, i, a) => i === 0 || v.time !== a[i - 1].time);
               
               chartDataRef.current = uniqueData;
-              candlestickSeries.setData(uniqueData);
+              if (seriesRef.current) {
+                 seriesRef.current.setData(uniqueData);
+              }
               return uniqueData;
             });
           }
@@ -407,7 +387,6 @@ export default function ChartComponent() {
 
     return () => {
       containerEl?.removeEventListener('mousedown', handleContainerMouseDown);
-      window.removeEventListener('resize', handleResize);
       isMounted = false;
       chart.unsubscribeClick(handleChartClick);
       chart.unsubscribeCrosshairMove(handleCrosshairMove);
@@ -416,6 +395,9 @@ export default function ChartComponent() {
       }
       chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleLogicalRangeChanged);
       chart.remove();
+      chartRef.current = null;
+      seriesRef.current = null;
+      indicatorsSeriesRef.current = {};
       // saveTimeout is handled via ref if needed, or we just let it fire since we have no access to it directly
     };
   }, [pair, interval, token]); // re-run effect when pair or interval changes

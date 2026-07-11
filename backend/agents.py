@@ -5,6 +5,7 @@ import httpx
 import asyncio
 import json
 from dotenv import load_dotenv
+from logger import agent_logger
 
 load_dotenv()
 
@@ -31,7 +32,7 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
         )
         return response.text
     except Exception as e:
-        print(f"Agent error: {e}")
+        agent_logger.error(f"Gemini API call failed: {e}")
         if response_mime_type == "application/json":
             return json.dumps({"action": "HOLD", "reason": f"API Quota/Error: {str(e)[:100]}", "confidence": 50})
         return f"ERROR: {str(e)}"
@@ -77,7 +78,7 @@ class TraderAgent:
                 "confidence": int(decision.get("confidence", 80))
             }
         except Exception as e:
-            print(f"Failed to parse JSON from TraderAgent: {e}. Fallback to HOLD.")
+            agent_logger.warning(f"TraderAgent JSON parse failed (fallback HOLD): {e}. Raw: {response_text[:100]}")
             return {
                 "action": "HOLD",
                 "reason": response_text,

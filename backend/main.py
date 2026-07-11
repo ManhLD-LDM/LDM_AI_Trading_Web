@@ -63,18 +63,35 @@ VALID_SYMBOL_RE = re.compile(r'^[A-Z]{2,20}$')
 VALID_INTERVALS = {'1s','1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','3d','1w','1M'}
 VALID_MODELS = {'lstm', 'xgboost', 'transformer', 'tcn'}
 
-origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")]
+origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()]
+environment = os.getenv("ENVIRONMENT", "development").lower()
 
-# FastAPI middleware is LIFO: last added = outermost = runs first.
-# Order: SlowAPI (inner) → CORS (outer, runs first on inbound request)
-# This ensures OPTIONS preflight gets CORS headers before rate-limiting.
+# In development: allow all origins so local/LAN testing works without CORS issues.
+# In production: strictly whitelist ALLOWED_ORIGINS only.
+if environment == "development":
+    # allow_origin_regex=".*" allows any origin AND supports credentials (JWT headers).
+    # allow_origins=["*"] would block credentials — cannot be used together.
+    cors_kwargs = dict(
+        allow_origin_regex=".*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    cors_kwargs = dict(
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    )
+
 app.add_middleware(SlowAPIMiddleware)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+app.add_middleware(CORSMiddleware, **cors_kwargs)
+
+# Log active CORS config on startup
+import logging as _logging
+_logging.getLogger("ldm.cors").info(
+    f"CORS mode={'OPEN (dev)' if environment == 'development' else f'STRICT ({len(origins)} origins)'}"
 )
 
 class ConnectionManager:

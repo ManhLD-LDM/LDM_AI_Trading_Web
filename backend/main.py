@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from logger import main_logger
 from alert_manager import alert_manager
 
-from database import connect_to_mongo, close_mongo_connection, db, get_database
+from database import connect_to_mongo, close_mongo_connection, db, get_database, is_connected
 from binance_api import get_historical_klines, get_mtf_klines
 from kronos_onnx import ModelEnsemble
 from agents import TechnicalAgent, SentimentAgent, TraderAgent
@@ -110,13 +110,20 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    return {
+        "status": "ok",
+        "database": "connected" if is_connected() else "mock_mode",
+        "models": list(ensemble_model.models.keys()) or ["none_loaded"],
+    }
 
 @app.post("/api/auth/register", response_model=Token)
 @limiter.limit("3/minute")
 async def register(request: Request, user: UserCreate):
-    if not db.client:
-        raise HTTPException(status_code=503, detail="Database not available (Mock mode)")
+    if not is_connected():
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable. Check MongoDB Atlas: cluster may be paused or IP not whitelisted."
+        )
     collection = get_database()["users"]
     existing_user = await collection.find_one({"email": user.email})
     if existing_user:
@@ -139,8 +146,11 @@ async def register(request: Request, user: UserCreate):
 @app.post("/api/auth/login", response_model=Token)
 @limiter.limit("5/minute")
 async def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends()):
-    if not db.client:
-        raise HTTPException(status_code=503, detail="Database not available (Mock mode)")
+    if not is_connected():
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable. Check MongoDB Atlas: cluster may be paused or IP not whitelisted."
+        )
     collection = get_database()["users"]
     user = await collection.find_one({"email": form_data.username})
     if not user or not verify_password(form_data.password, user["hashed_password"]):

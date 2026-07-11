@@ -24,7 +24,7 @@ const ALL_INTERVALS = [
 ];
 
 export default function Toolbar({ onToggleAiSidebar }: { onToggleAiSidebar?: () => void }) {
-  const { pair, interval, setPair, setInterval } = useTradingStore();
+  const { pair, interval, setPair, setInterval, token } = useTradingStore();
   
   const [pairs, setPairs] = useState<string[]>(['BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'XRPUSDT']);
   const [isPairOpen, setIsPairOpen] = useState(false);
@@ -53,7 +53,6 @@ export default function Toolbar({ onToggleAiSidebar }: { onToggleAiSidebar?: () 
     try {
       const host = window.location.hostname;
       const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
-      const token = localStorage.getItem('token');
       await fetch(`${API_URL}/api/analysis/run`, {
         method: 'POST',
         headers: {

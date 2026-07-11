@@ -5,8 +5,9 @@ import asyncio
 import json
 import time
 import os
+import re
 from datetime import datetime, timezone
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, Field
 from contextlib import asynccontextmanager
 
 from database import connect_to_mongo, close_mongo_connection, db, get_database
@@ -53,6 +54,11 @@ app.add_middleware(SlowAPIMiddleware)
 
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 app.include_router(paper.router, prefix="/api/paper", tags=["Paper Trading"])
+
+# Validation constants
+VALID_SYMBOL_RE = re.compile(r'^[A-Z]{2,20}$')
+VALID_INTERVALS = {'1s','1m','3m','5m','15m','30m','1h','2h','4h','6h','8h','12h','1d','3d','1w','1M'}
+VALID_MODELS = {'lstm', 'xgboost', 'transformer', 'tcn'}
 
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")]
 
@@ -101,7 +107,8 @@ async def health_check():
     return {"status": "ok"}
 
 @app.post("/api/auth/register", response_model=Token)
-async def register(user: UserCreate):
+@limiter.limit("3/minute")
+async def register(request: Request, user: UserCreate):
     if not db.client:
         raise HTTPException(status_code=503, detail="Database not available (Mock mode)")
     collection = get_database()["users"]
@@ -165,7 +172,7 @@ class UserPreferences(BaseModel):
 
 @app.put("/api/user/preferences")
 async def update_preferences(preferences: UserPreferences, current_user_email: str = Depends(get_current_user)):
-    prefs_dict = preferences.dict(exclude_unset=True)
+    prefs_dict = preferences.model_dump(exclude_unset=True)
     if not db.client:
         return {"status": "success", "preferences": prefs_dict, "mock": True}
     collection = get_database()["users"]
@@ -287,9 +294,31 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 class AnalysisRequest(BaseModel):
-    symbol: str
-    interval: str
-    model_type: str = "lstm"
+    symbol: str = Field(..., min_length=3, max_length=20)
+    interval: str = Field(default="1m")
+    model_type: str = Field(default="lstm")
+
+    @field_validator('symbol')
+    @classmethod
+    def validate_symbol(cls, v: str) -> str:
+        v = v.upper().strip()
+        if not VALID_SYMBOL_RE.match(v):
+            raise ValueError('Symbol must be 3-20 uppercase letters, e.g. BTCUSDT')
+        return v
+
+    @field_validator('interval')
+    @classmethod
+    def validate_interval(cls, v: str) -> str:
+        if v not in VALID_INTERVALS:
+            raise ValueError(f'interval must be one of: {sorted(VALID_INTERVALS)}')
+        return v
+
+    @field_validator('model_type')
+    @classmethod
+    def validate_model_type(cls, v: str) -> str:
+        if v not in VALID_MODELS:
+            raise ValueError(f'model_type must be one of: {VALID_MODELS}')
+        return v
 
 analysis_queue = asyncio.Queue()
 WORKER_COUNT = 5
@@ -313,20 +342,19 @@ async def trigger_analysis(request: Request, req: AnalysisRequest, current_user_
     return {"status": "success", "message": f"Queued analysis for {req.symbol} on {req.interval} using {req.model_type}."}
 
 async def run_analysis_with_recovery(symbol: str, interval: str, model_type: str):
-    # Lặp lại 3 lần nếu có lỗi
     for attempt in range(3):
-            try:
-                await run_analysis_for_symbol(symbol, interval, model_type)
-                break
-            except Exception as e:
-                print(f"[{symbol}] Attempt {attempt+1} failed: {e}")
-                if attempt == 2:
-                    await manager.broadcast(json.dumps({
-                        "type": "error",
-                        "agent_name": "System",
-                        "message": f"Analysis failed for {symbol}: {str(e)}"
-                    }))
-                await asyncio.sleep(2)
+        try:
+            await run_analysis_for_symbol(symbol, interval, model_type)
+            break
+        except Exception as e:
+            print(f"[{symbol}] Attempt {attempt+1} failed: {e}")
+            if attempt == 2:
+                await manager.broadcast(json.dumps({
+                    "type": "error",
+                    "agent_name": "System",
+                    "message": f"Analysis failed for {symbol}: {str(e)}"
+                }))
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
 
 async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = "lstm"):
     try:

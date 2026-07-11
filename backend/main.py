@@ -9,9 +9,10 @@ import re
 from datetime import datetime, timezone
 from pydantic import BaseModel, field_validator, Field
 from contextlib import asynccontextmanager
+from logger import main_logger
 
 from database import connect_to_mongo, close_mongo_connection, db, get_database
-from binance_api import get_historical_klines
+from binance_api import get_historical_klines, get_mtf_klines
 from kronos_onnx import ModelEnsemble
 from agents import TechnicalAgent, SentimentAgent, TraderAgent
 from auth import (
@@ -358,53 +359,56 @@ async def run_analysis_with_recovery(symbol: str, interval: str, model_type: str
 
 async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = "lstm"):
     try:
-        # 1. Fetch market data
-        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Fetching latest market data for {interval}..."}))
+        # 1. Fetch multi-timeframe market data concurrently
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Fetching MTF data (5 timeframes)..."}))
+        mtf_data = await get_mtf_klines(symbol=symbol)
+
+        # Also fetch single-interval data for agents (candles + price)
         history_data = await get_historical_klines(symbol=symbol, interval=interval, limit=512)
-        
-        # 2. Run Model Ensemble
-        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running {model_type.upper()} Inference..."}))
-        kronos_prediction = ensemble_model.predict(history_data, model_type, symbol, interval)
+
+        # 2. Run Model Ensemble (async, non-blocking)
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "System", "thought": f"[{symbol}] Running {model_type.upper()} MTF Inference..."}))
+        kronos_prediction = await ensemble_model.predict_async(mtf_data, model_type, symbol, interval)
         await manager.broadcast(json.dumps({
-            "type": "ai_log", 
-            "agent_name": "Kronos", 
+            "type": "ai_log",
+            "agent_name": "Kronos",
             "thought": f"[{symbol}] Trend: {kronos_prediction.get('trend')} (Confidence: {kronos_prediction.get('confidence')}%)"
         }))
 
         # 3. Agents analysis (concurrently)
-        recent_candles = history_data[-50:] if len(history_data) >= 50 else history_data
-        current_price = history_data[-1][4] # Close price of the last candle
-        
+        recent_candles = history_data[-50:].tolist() if hasattr(history_data, 'tolist') else list(history_data)[-50:]
+        current_price = float(history_data[-1][4])
+
         tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, recent_candles, interval))
         sent_task = asyncio.create_task(sentiment_agent.analyze(symbol))
-        
+
         tech_analysis, sent_analysis = await asyncio.gather(tech_task, sent_task)
-        
+
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Tech Agent", "thought": f"[{symbol}] Technical analysis completed."}))
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Sentiment Agent", "thought": f"[{symbol}] Sentiment analysis completed."}))
 
         # 4. Final Decision
         decision = await trader_agent.decide(tech_analysis, sent_analysis, interval)
-        
+
         await manager.broadcast(json.dumps({
-            "type": "ai_log", 
-            "agent_name": "Trader Agent", 
+            "type": "ai_log",
+            "agent_name": "Trader Agent",
             "thought": f"[{symbol}] Decision: {decision.get('action')}. {decision.get('reason')}",
             "action": decision.get('action'),
-            "price": float(current_price),
+            "price": current_price,
             "timestamp": int(history_data[-1][0] / 1000)
         }))
-        
-        # Store in DB (if DB is connected)
+
+        # Store in DB
         if db.client:
             collection = get_database()["trade_signals"]
             await collection.insert_one({
                 "symbol": symbol,
                 "action": decision.get('action'),
                 "confidence": decision.get('confidence'),
-                "price": float(current_price),
+                "price": current_price,
                 "reason": decision.get('reason'),
                 "createdAt": datetime.now(timezone.utc)
             })
     except Exception as e:
-        print(f"[{symbol}] Analysis error: {e}")
+        main_logger.error(f"[{symbol}] Analysis error: {e}")

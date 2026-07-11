@@ -1,7 +1,9 @@
 import numpy as np
 import os
+import asyncio
 import pandas as pd
 import pandas_ta as ta
+from logger import model_logger
 
 try:
     import onnxruntime as ort
@@ -18,6 +20,109 @@ try:
 except ImportError:
     xgb = None
 
+# ─── MTF timeframes and indicator counts ──────────────────────────────────────
+MTF_INTERVALS = ['1m', '5m', '15m', '1h', '4h']
+# Per timeframe: EMA20, EMA50, RSI14, MACD_line, MACD_signal, BB_upper, BB_lower, ATR14 = 8 + close = 9 → 9×5 = 45 features
+FEATURES_PER_TF = 9
+N_TIMEFRAMES = len(MTF_INTERVALS)
+TOTAL_FEATURES = FEATURES_PER_TF * N_TIMEFRAMES  # 45; model expects 65 → padded
+SEQ_LEN = 60
+
+
+def _compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    """Compute 9 technical indicators + close from an OHLCV DataFrame."""
+    df = df.copy()
+    df.ta.ema(length=20, append=True)
+    df.ta.ema(length=50, append=True)
+    df.ta.rsi(length=14, append=True)
+    df.ta.macd(fast=12, slow=26, signal=9, append=True)
+    df.ta.bbands(length=20, std=2, append=True)
+    df.ta.atr(length=14, append=True)
+
+    cols = [
+        'close',
+        'EMA_20', 'EMA_50',
+        'RSI_14',
+        'MACD_12_26_9', 'MACDs_12_26_9',
+        'BBU_20_2.0', 'BBL_20_2.0',
+        'ATRr_14',
+    ]
+    # Use available columns (names may differ between pandas_ta versions)
+    available = []
+    for c in cols:
+        matching = [col for col in df.columns if c in col]
+        if matching:
+            available.append(matching[0])
+        elif c == 'close':
+            available.append('close')
+
+    result = df[available].copy()
+    result.bfill(inplace=True)
+    result.fillna(0, inplace=True)
+    return result
+
+
+def _df_from_klines(klines: list) -> pd.DataFrame:
+    """Convert raw kline list to a pandas DataFrame."""
+    df = pd.DataFrame(klines, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('timestamp', inplace=True)
+    for col in ['open', 'high', 'low', 'close', 'volume']:
+        df[col] = df[col].astype(float)
+    return df
+
+
+def _build_mtf_features(mtf_data: dict) -> np.ndarray:
+    """
+    Build (SEQ_LEN, 65) feature matrix from MTF kline data.
+    Each timeframe contributes FEATURES_PER_TF columns.
+    If total < 65, pad with zeros to reach expected model input shape.
+    """
+    tf_features = []
+
+    for tf in MTF_INTERVALS:
+        klines = mtf_data.get(tf, [])
+        if len(klines) < 30:
+            # Not enough data — use zeros for this timeframe
+            tf_features.append(np.zeros((SEQ_LEN, FEATURES_PER_TF), dtype=np.float32))
+            continue
+
+        df = _df_from_klines(klines)
+        ind_df = _compute_indicators(df)
+
+        # Reindex to SEQ_LEN rows
+        arr = ind_df.values.astype(np.float32)
+        if len(arr) < SEQ_LEN:
+            pad = np.tile(arr[:1], (SEQ_LEN - len(arr), 1))
+            arr = np.vstack([pad, arr])
+        else:
+            arr = arr[-SEQ_LEN:]
+
+        # Normalise each column to [0,1]
+        mins = arr.min(axis=0)
+        maxs = arr.max(axis=0)
+        arr = (arr - mins) / (maxs - mins + 1e-8)
+
+        # Keep exactly FEATURES_PER_TF columns
+        if arr.shape[1] >= FEATURES_PER_TF:
+            arr = arr[:, :FEATURES_PER_TF]
+        else:
+            pad_cols = np.zeros((SEQ_LEN, FEATURES_PER_TF - arr.shape[1]), dtype=np.float32)
+            arr = np.hstack([arr, pad_cols])
+
+        tf_features.append(arr)
+
+    # Stack all timeframes side-by-side → (SEQ_LEN, N_TIMEFRAMES × FEATURES_PER_TF)
+    combined = np.hstack(tf_features)  # (60, 45)
+
+    # Pad to 65 features (model's expected input)
+    if combined.shape[1] < 65:
+        pad_cols = np.zeros((SEQ_LEN, 65 - combined.shape[1]), dtype=np.float32)
+        combined = np.hstack([combined, pad_cols])
+
+    return combined.astype(np.float32)
+
+
 class ModelEnsemble:
     CLASS_MAP = {
         'BTCUSDT': 'crypto',
@@ -27,10 +132,6 @@ class ModelEnsemble:
     }
 
     def __init__(self, models_dir: str = "."):
-        # Models are now in backend/trainers because train_dl.py saves them there, wait!
-        # train_dl.py saves them to base_dir which is backend/
-        # Wait, the code in train_dl.py:
-        # base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) # This is backend/
         self.models_dir = models_dir
         self.models = {}
 
@@ -38,125 +139,104 @@ class ModelEnsemble:
         key = f"{model_type}_{asset_class}"
         if key in self.models:
             return self.models[key]
-            
+
         if model_type == "xgboost":
             path = os.path.join(self.models_dir, f"xgboost_{asset_class}.json")
             if os.path.exists(path) and xgb is not None:
                 bst = xgb.Booster()
                 bst.load_model(path)
                 self.models[key] = bst
-                print(f"Loaded {key} from {path}")
+                model_logger.info(f"Loaded {key} from {path}")
                 return bst
         else:
             path = os.path.join(self.models_dir, f"{model_type}_{asset_class}.onnx")
             if os.path.exists(path) and ort is not None:
                 session = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
                 self.models[key] = session
-                print(f"Loaded {key} from {path}")
+                model_logger.info(f"Loaded {key} from {path}")
                 return session
-                
+
         return None
 
-    def predict(self, history_data: list, model_type: str = "lstm", symbol: str = "BTCUSDT", interval: str = "15m") -> dict:
+    async def predict_async(self, mtf_data: dict, model_type: str = "lstm",
+                            symbol: str = "BTCUSDT", interval: str = "15m") -> dict:
         """
-        Dự đoán giá tương lai dựa trên dữ liệu lịch sử và loại mô hình được chọn.
-        Lưu ý: Để chạy thực tế MTF, cần dữ liệu 1m, 5m, 15m, 1h, 4h.
-        Hiện tại dùng mock output cho đến khi API hỗ trợ kéo đa khung thời gian.
+        Main async prediction entry point.
+        mtf_data: dict from get_mtf_klines() — {"1m": [...], "5m": [...], ...}
+        Returns trend, confidence, and status dict.
         """
         asset_class = self.CLASS_MAP.get(symbol, 'crypto')
         model = self._get_or_load_model(model_type, asset_class)
-        
+
+        # Determine last close from the smallest timeframe available
+        last_close = 0.0
+        for tf in MTF_INTERVALS:
+            klines = mtf_data.get(tf, [])
+            if klines:
+                last_close = float(klines[-1][4])
+                break
+
         if model is None:
-            # Fallback mock mode
+            # Graceful fallback using price direction
             import random
-            if isinstance(history_data, (list, np.ndarray)) and len(history_data) > 0:
-                first_close = float(history_data[0][4])
-                last_close = float(history_data[-1][4])
-                trend = "up" if last_close >= first_close else "down"
-                confidence = round(random.uniform(60.0, 95.0), 2)
+            if mtf_data:
+                first_tf = MTF_INTERVALS[0]
+                kl = mtf_data.get(first_tf, [])
+                if len(kl) >= 2:
+                    trend = "up" if float(kl[-1][4]) >= float(kl[0][4]) else "down"
+                else:
+                    trend = "up"
             else:
                 trend = "up"
-                confidence = 75.5
-                
+            confidence = round(random.uniform(60.0, 95.0), 2)
             return {
                 "status": "mock",
                 "trend": trend,
                 "confidence": confidence,
-                "reason": f"Model '{model_type}' for {symbol} not loaded. Using dynamic mock ({trend})."
+                "reason": f"Model '{model_type}' for {symbol} not loaded. Mock mode ({trend})."
             }
 
         try:
-            import numpy as np
-            import pandas as pd
-            import pandas_ta as ta
-
-            if isinstance(history_data, (list, np.ndarray)) and len(history_data) > 0:
-                df = pd.DataFrame(history_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-                df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-                df.set_index('timestamp', inplace=True)
-                
-                # Tính toán cơ bản 12 indicators
-                df.ta.ema(length=20, append=True)
-                df.ta.ema(length=50, append=True)
-                df.ta.rsi(length=14, append=True)
-                df.ta.macd(fast=12, slow=26, signal=9, append=True)
-                df.ta.bbands(length=20, std=2, append=True)
-                df.ta.atr(length=14, append=True)
-                
-                df.bfill(inplace=True)
-                df.fillna(0, inplace=True)
-                
-                # Lấy 60 nến cuối cùng
-                recent_df = df.tail(60)
-                if len(recent_df) < 60:
-                    # Pad if not enough
-                    pad_len = 60 - len(recent_df)
-                    pad_df = pd.DataFrame([recent_df.iloc[0].values]*pad_len, columns=recent_df.columns)
-                    recent_df = pd.concat([pad_df, recent_df], ignore_index=True)
-                
-                features = recent_df.values # shape: (60, num_features)
-                num_features = features.shape[1] # Thường là 5 OHLCV + 12 ind = 17
-                
-                # Scale rough approximation (min-max)
-                features = (features - np.min(features, axis=0)) / (np.max(features, axis=0) - np.min(features, axis=0) + 1e-8)
-                
-                # Fill to 65 features by repeating (mocking MTF)
-                full_features = np.zeros((60, 65), dtype=np.float32)
-                for i in range(65):
-                    full_features[:, i] = features[:, i % num_features]
-                
-                last_close = float(df['close'].iloc[-1])
-            else:
-                full_features = np.zeros((60, 65), dtype=np.float32)
-                last_close = 1.0
+            # Build feature matrix in thread so we don't block event loop
+            full_features = await asyncio.to_thread(_build_mtf_features, mtf_data)
 
             if model_type == "xgboost":
-                import xgboost as xgb
-                X_xgb = full_features.reshape(1, 60 * 65)
+                X_xgb = full_features.reshape(1, SEQ_LEN * 65)
                 dmatrix = xgb.DMatrix(X_xgb)
-                pred = model.predict(dmatrix)[0]
-                prob = float(pred)
+                pred_raw = await asyncio.to_thread(model.predict, dmatrix)
+                prob = float(pred_raw[0])
             else:
                 input_name = model.get_inputs()[0].name
-                X_dl = full_features.reshape(1, 60, 65)
-                ort_outs = model.run(None, {input_name: X_dl})
+                X_dl = full_features.reshape(1, SEQ_LEN, 65)
+                ort_outs = await asyncio.to_thread(model.run, None, {input_name: X_dl})
                 pred = ort_outs[0][0]
                 prob = float(pred[1]) if len(pred) > 1 else float(pred[0])
 
             trend = "up" if prob >= 0.5 else "down"
             confidence = round(max(prob, 1 - prob) * 100, 2)
-            
+
             return {
                 "status": "success",
                 "trend": trend,
                 "confidence": confidence,
-                "reason": f"Predicted using {model_type.upper()} model for {symbol} (Deterministic MTF Fallback)."
+                "reason": f"{model_type.upper()} MTF prediction for {symbol} ({N_TIMEFRAMES} timeframes)."
             }
         except Exception as e:
-            print(f"Prediction error with {model_type}: {e}")
+            model_logger.error(f"Prediction error [{model_type}/{symbol}]: {e}")
             return {
                 "status": "error",
                 "trend": "down",
                 "confidence": 50,
                 "reason": str(e)
             }
+
+    def predict(self, history_data, model_type: str = "lstm",
+                symbol: str = "BTCUSDT", interval: str = "15m") -> dict:
+        """Legacy sync wrapper — wraps single-TF history_data into MTF-compatible dict."""
+        if isinstance(history_data, list) and len(history_data) > 0:
+            mtf_data = {interval: [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in history_data]}
+        elif hasattr(history_data, 'tolist'):
+            mtf_data = {interval: [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5])] for r in history_data.tolist()]}
+        else:
+            mtf_data = {}
+        return asyncio.run(self.predict_async(mtf_data, model_type, symbol, interval))

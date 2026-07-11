@@ -141,7 +141,15 @@ export const TradingAPI = {
   resetPortfolio: (token: string) => apiPost('/api/paper/reset', undefined, token),
 
   // Backtest
-  runBacktest: (payload: { strategy: string; symbol: string; interval: string; limit?: number; model_type?: string }, token: string) =>
+  runBacktest: (payload: {
+    strategy: string;
+    symbol: string;
+    interval?: string;
+    limit?: number;
+    model_type?: string;
+    start_date?: string;
+    end_date?: string;
+  }, token: string) =>
     apiPost('/api/backtest/run', payload, token),
 
   // Live Trading

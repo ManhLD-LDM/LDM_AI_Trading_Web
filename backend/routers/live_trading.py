@@ -64,7 +64,11 @@ async def _get_executor(user_email: str, testnet: bool):
     Raises 400 if keys not configured, 500 if decryption fails.
     """
     if not is_connected():
-        raise HTTPException(503, "Database unavailable. Cannot load API keys.")
+        raise HTTPException(
+            503,
+            "Database unavailable. Binance API keys cannot be loaded. "
+            "Check MongoDB Atlas connection."
+        )
 
     db = get_database()
     user = await db["users"].find_one({"email": user_email})
@@ -204,6 +208,8 @@ async def live_balance(
     current_user_email: str = Depends(get_current_user)
 ):
     """Lấy balance thực tế từ Binance account."""
+    if not is_connected():
+        return {"balances": {}, "usdt_free": 0.0, "testnet": testnet, "db_unavailable": True}
     executor = await _get_executor(current_user_email, testnet)
     balances = await executor.get_account_balance()
     usdt = balances.get("USDT", {}).get("free", 0.0)
@@ -211,6 +217,7 @@ async def live_balance(
         "balances": balances,
         "usdt_free": usdt,
         "testnet": testnet,
+        "db_unavailable": False,
     }
 
 
@@ -221,9 +228,11 @@ async def get_open_orders(
     current_user_email: str = Depends(get_current_user)
 ):
     """Lấy danh sách open orders, optional filter theo symbol."""
+    if not is_connected():
+        return {"orders": [], "count": 0, "db_unavailable": True}
     executor = await _get_executor(current_user_email, testnet)
     orders = await executor.get_open_orders(symbol=symbol.upper() if symbol else None)
-    return {"orders": orders, "count": len(orders)}
+    return {"orders": orders, "count": len(orders), "db_unavailable": False}
 
 
 @router.delete("/orders/{symbol}")

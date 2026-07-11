@@ -2,7 +2,7 @@
 import { useState } from 'react';
 import { useTradingStore } from '@/store/useStore';
 import { TradingAPI } from '@/lib/api';
-import { Play, TrendingUp, TrendingDown, BarChart3, Activity, Percent, Target } from 'lucide-react';
+import { Play, Activity, BarChart3, Calendar, Clock, Info } from 'lucide-react';
 
 interface BacktestResult {
   initial_balance: number;
@@ -22,11 +22,10 @@ const STRATEGIES = [
   { value: 'macd', label: 'MACD Crossover', description: 'Classic momentum strategy' },
   { value: 'rsi', label: 'RSI Mean Reversion', description: 'Oversold/overbought signals' },
 ];
-
-const MODEL_TYPES = ['lstm', 'xgboost', 'transformer', 'tcn'];
+const MODEL_TYPES = ['lstm', 'tcn', 'transformer', 'xgboost'];
 const PAIRS = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT', 'DOGEUSDT'];
 const INTERVALS = ['15m', '1h', '4h', '1d'];
-const LIMITS = [200, 500, 1000, 2000, 5000];
+const LIMITS = [500, 1000, 2000, 5000];
 
 function MetricCard({ label, value, sub, positive }: { label: string; value: string; sub?: string; positive?: boolean }) {
   const color = positive === undefined ? 'text-slate-100' : positive ? 'text-emerald-400' : 'text-rose-400';
@@ -39,20 +38,17 @@ function MetricCard({ label, value, sub, positive }: { label: string; value: str
   );
 }
 
-// Micro equity chart using SVG sparkline
 function EquitySparkline({ data }: { data: Array<{ equity: number }> }) {
   if (!data || data.length < 2) return null;
   const equities = data.map(d => d.equity);
   const min = Math.min(...equities);
   const max = Math.max(...equities);
   const range = max - min || 1;
-  const w = 400;
-  const h = 80;
+  const w = 400; const h = 80;
   const pts = equities
     .map((e, i) => `${(i / (equities.length - 1)) * w},${h - ((e - min) / range) * h}`)
     .join(' ');
   const isUp = equities[equities.length - 1] >= equities[0];
-
   return (
     <div className="mt-4">
       <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">
@@ -66,18 +62,8 @@ function EquitySparkline({ data }: { data: Array<{ equity: number }> }) {
               <stop offset="100%" stopColor={isUp ? '#10b981' : '#ef4444'} stopOpacity="0" />
             </linearGradient>
           </defs>
-          <polyline
-            points={pts}
-            fill="none"
-            stroke={isUp ? '#10b981' : '#ef4444'}
-            strokeWidth="2"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          <polygon
-            points={`0,${h} ${pts} ${w},${h}`}
-            fill="url(#eqGrad)"
-          />
+          <polyline points={pts} fill="none" stroke={isUp ? '#10b981' : '#ef4444'} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+          <polygon points={`0,${h} ${pts} ${w},${h}`} fill="url(#eqGrad)" />
         </svg>
         <div className="absolute top-3 right-4 flex gap-4 text-xs">
           <span className="text-slate-600">${min.toLocaleString('en', { maximumFractionDigits: 0 })}</span>
@@ -88,16 +74,36 @@ function EquitySparkline({ data }: { data: Array<{ equity: number }> }) {
   );
 }
 
+// Convenience: today and 7 days ago as YYYY-MM-DD
+function today() { return new Date().toISOString().slice(0, 10); }
+function daysAgo(n: number) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function BacktestPanel() {
   const { token } = useTradingStore();
+
+  // Mode: 'limit' or 'date_range'
+  const [mode, setMode] = useState<'limit' | 'date_range'>('limit');
+
+  // Shared
   const [strategy, setStrategy] = useState('kronos');
   const [pair, setPair] = useState('BTCUSDT');
+  const [modelType, setModelType] = useState('lstm');
+
+  // Limit mode
   const [interval, setInterval] = useState('1h');
   const [limit, setLimit] = useState(1000);
-  const [modelType, setModelType] = useState('lstm');
+
+  // Date range mode
+  const [startDate, setStartDate] = useState(daysAgo(7));
+  const [endDate, setEndDate] = useState(today());
 
   const [isRunning, setIsRunning] = useState(false);
   const [result, setResult] = useState<BacktestResult | null>(null);
+  const [fetchSummary, setFetchSummary] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const handleRun = async () => {
@@ -105,15 +111,29 @@ export default function BacktestPanel() {
     setIsRunning(true);
     setError(null);
     setResult(null);
+    setFetchSummary('');
     try {
-      const data = await TradingAPI.runBacktest({
+      const payload: Record<string, unknown> = {
         strategy,
         symbol: pair,
-        interval,
-        limit,
         model_type: modelType,
-      }, token) as { data: BacktestResult };
-      setResult(data.data);
+      };
+
+      if (mode === 'date_range') {
+        payload.start_date = startDate;
+        payload.end_date = endDate;
+        // interval defaults to 1m on server, limit not used in date-range mode
+      } else {
+        payload.interval = interval;
+        payload.limit = limit;
+      }
+
+      const res = await TradingAPI.runBacktest(payload as any, token) as {
+        data: BacktestResult;
+        fetch_summary?: string;
+      };
+      setResult(res.data);
+      setFetchSummary(res.fetch_summary || '');
     } catch (e: any) {
       setError(e.message || 'Backtest failed');
     } finally {
@@ -132,29 +152,43 @@ export default function BacktestPanel() {
       </div>
 
       {/* Config Card */}
-      <div className="glass-panel rounded-2xl p-5">
-        <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-500 mb-4">Configuration</h3>
+      <div className="glass-panel rounded-2xl p-5 space-y-5">
+        <h3 className="text-xs font-semibold uppercase tracking-widest text-slate-500">Configuration</h3>
 
-        {/* Strategy selector */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-5">
+        {/* Strategy */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {STRATEGIES.map(s => (
-            <button
-              key={s.value}
-              onClick={() => setStrategy(s.value)}
+            <button key={s.value} onClick={() => setStrategy(s.value)}
               className={`text-left p-3 rounded-xl border transition-all cursor-pointer ${
                 strategy === s.value
                   ? 'border-amber-500/40 bg-amber-500/10 text-amber-400'
                   : 'border-white/10 text-slate-400 hover:border-white/20 hover:text-slate-300'
-              }`}
-            >
+              }`}>
               <div className="text-sm font-semibold">{s.label}</div>
               <div className="text-[11px] opacity-70 mt-0.5">{s.description}</div>
             </button>
           ))}
         </div>
 
-        {/* Params row */}
+        {/* Mode toggle */}
+        <div className="flex items-center gap-1 bg-white/5 rounded-xl p-1 w-fit">
+          <button onClick={() => setMode('limit')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              mode === 'limit' ? 'bg-white/10 text-slate-200' : 'text-slate-500 hover:text-slate-400'
+            }`}>
+            <Clock size={11} /> Last N candles
+          </button>
+          <button onClick={() => setMode('date_range')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              mode === 'date_range' ? 'bg-white/10 text-slate-200' : 'text-slate-500 hover:text-slate-400'
+            }`}>
+            <Calendar size={11} /> Date range (1m)
+          </button>
+        </div>
+
+        {/* Params */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {/* Pair — always */}
           <div className="space-y-1.5">
             <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Pair</label>
             <select value={pair} onChange={e => setPair(e.target.value)}
@@ -162,40 +196,68 @@ export default function BacktestPanel() {
               {PAIRS.map(p => <option key={p} className="bg-slate-900">{p}</option>)}
             </select>
           </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Timeframe</label>
-            <select value={interval} onChange={e => setInterval(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
-              {INTERVALS.map(i => <option key={i} className="bg-slate-900">{i}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Candles</label>
-            <select value={limit} onChange={e => setLimit(Number(e.target.value))}
-              className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
-              {LIMITS.map(l => <option key={l} className="bg-slate-900">{l}</option>)}
-            </select>
-          </div>
+
+          {mode === 'limit' ? (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Timeframe</label>
+                <select value={interval} onChange={e => setInterval(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
+                  {INTERVALS.map(i => <option key={i} className="bg-slate-900">{i}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Candles</label>
+                <select value={limit} onChange={e => setLimit(Number(e.target.value))}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
+                  {LIMITS.map(l => <option key={l} className="bg-slate-900">{l}</option>)}
+                </select>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Start Date</label>
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">End Date</label>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors" />
+              </div>
+            </>
+          )}
+
+          {/* Model — only for Kronos */}
           {strategy === 'kronos' && (
             <div className="space-y-1.5">
               <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Model</label>
               <select value={modelType} onChange={e => setModelType(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-amber-500/50 transition-colors">
-                {MODEL_TYPES.map(m => <option key={m} className="bg-slate-900">{m.toUpperCase()}</option>)}
+                {MODEL_TYPES.map(m => <option key={m} value={m} className="bg-slate-900">{m.toUpperCase()}</option>)}
               </select>
             </div>
           )}
         </div>
 
-        <button
-          onClick={handleRun}
-          disabled={isRunning || !token}
-          className="mt-5 flex items-center justify-center gap-2 w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-semibold py-3 rounded-xl transition-all active:scale-[0.98] shadow-[0_4px_15px_rgba(251,191,36,0.2)] cursor-pointer"
-        >
+        {/* Date range info */}
+        {mode === 'date_range' && (
+          <div className="flex items-start gap-2 bg-sky-500/8 border border-sky-500/20 rounded-xl px-4 py-3 text-xs text-sky-400">
+            <Info size={13} className="mt-0.5 shrink-0" />
+            <span>
+              Date-range mode fetches ALL 1-minute candles from Binance. Max ~35 days per run.
+              Long ranges may take 10–30 seconds to fetch and process.
+            </span>
+          </div>
+        )}
+
+        <button onClick={handleRun} disabled={isRunning || !token}
+          className="flex items-center justify-center gap-2 w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-semibold py-3 rounded-xl transition-all active:scale-[0.98] shadow-[0_4px_15px_rgba(251,191,36,0.2)] cursor-pointer">
           <Play size={15} fill="currentColor" />
-          {isRunning ? 'Running...' : 'Run Backtest'}
+          {isRunning ? 'Fetching & running...' : 'Run Backtest'}
         </button>
-        {!token && <p className="text-xs text-slate-600 text-center mt-2">Sign in to run backtests</p>}
+        {!token && <p className="text-xs text-slate-600 text-center">Sign in to run backtests</p>}
       </div>
 
       {/* Error */}
@@ -208,7 +270,12 @@ export default function BacktestPanel() {
       {/* Results */}
       {result && (
         <div className="space-y-4">
-          {/* Key metrics */}
+          {fetchSummary && (
+            <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+              <Activity size={11} /> {fetchSummary}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <MetricCard label="Final Equity" value={`$${result.final_equity.toLocaleString('en', { maximumFractionDigits: 0 })}`} sub={`Started $${result.initial_balance.toLocaleString()}`} />
             <MetricCard label="ROI" value={`${result.roi_percent >= 0 ? '+' : ''}${result.roi_percent}%`} positive={isPositive} />
@@ -223,11 +290,9 @@ export default function BacktestPanel() {
             <MetricCard label="Initial Balance" value={`$${result.initial_balance.toLocaleString()}`} />
           </div>
 
-          {/* Equity curve */}
           <div className="glass-panel rounded-2xl p-5">
             <EquitySparkline data={result.equity_curve} />
 
-            {/* Recent trades */}
             {result.trades && result.trades.length > 0 && (
               <div className="mt-6">
                 <div className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3 flex items-center gap-2">

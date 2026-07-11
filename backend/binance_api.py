@@ -80,3 +80,64 @@ async def get_mtf_klines(
     tasks = [_fetch_one(iv) for iv in intervals]
     results = await asyncio.gather(*tasks)
     return dict(results)
+
+
+async def get_klines_date_range(
+    symbol: str,
+    interval: str = "1m",
+    start_ts: int = 0,   # Unix ms
+    end_ts: int = 0,     # Unix ms
+) -> list:
+    """
+    Fetch ALL klines between start_ts and end_ts by paginating Binance in 1000-candle chunks.
+    Binance limit is max 1000 candles per request — this function handles pagination automatically.
+
+    Returns: list of [timestamp_ms, open, high, low, close, volume] (floats)
+    """
+    if end_ts <= 0:
+        end_ts = int(time.time() * 1000)
+    if start_ts <= 0:
+        raise ValueError("start_ts must be a positive Unix timestamp in ms")
+
+    all_candles: list = []
+    current_start = start_ts
+    MAX_PER_REQUEST = 1000
+
+    logger.info(f"[{symbol}/{interval}] Fetching date range: {start_ts} → {end_ts}")
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        while current_start < end_ts:
+            params = {
+                "symbol": symbol,
+                "interval": interval,
+                "startTime": current_start,
+                "endTime": end_ts,
+                "limit": MAX_PER_REQUEST,
+            }
+            try:
+                resp = await client.get(BASE_URL, params=params)
+                resp.raise_for_status()
+                batch = resp.json()
+            except Exception as e:
+                logger.error(f"[{symbol}] Pagination fetch failed at {current_start}: {e}")
+                break
+
+            if not batch:
+                break
+
+            parsed = [
+                [int(d[0]), float(d[1]), float(d[2]), float(d[3]), float(d[4]), float(d[5])]
+                for d in batch
+            ]
+            all_candles.extend(parsed)
+
+            last_ts = int(batch[-1][0])
+            if last_ts >= end_ts or len(batch) < MAX_PER_REQUEST:
+                break
+
+            # Advance to next candle after last batch
+            current_start = last_ts + 1
+            await asyncio.sleep(0.12)  # Respect Binance rate limit (1200 req/min)
+
+    logger.info(f"[{symbol}/{interval}] Fetched {len(all_candles)} candles total")
+    return all_candles

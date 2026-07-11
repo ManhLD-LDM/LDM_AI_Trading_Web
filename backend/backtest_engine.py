@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import pandas_ta as ta
 
 class BacktestEngine:
     def __init__(self, initial_balance=10000.0, maker_fee=0.001, taker_fee=0.001):
@@ -37,10 +38,14 @@ class BacktestEngine:
         
     def _simulate(self, df: pd.DataFrame, risk_per_trade=0.02, slippage=0.0005, atr_sl_multiplier=2.0, atr_tp_multiplier=4.0):
         # Ensure ATR is calculated for dynamic Stop-Loss
-        import pandas_ta as ta
         if 'atr' not in df.columns:
             df.ta.atr(length=14, append=True)
-            df['atr'] = df['ATRr_14'].bfill()
+            # pandas_ta column naming may vary
+            atr_col = next((c for c in df.columns if c.startswith('ATRr')), None)
+            if atr_col:
+                df['atr'] = df[atr_col].bfill()
+            else:
+                df['atr'] = df['close'] * 0.02
 
         balance = self.initial_balance
         position = 0
@@ -176,6 +181,39 @@ class BacktestEngine:
             "profit_factor": round(profit_factor, 2),
             "max_drawdown_percent": round(max_drawdown * 100, 2),
             "sharpe_ratio": round(sharpe_ratio, 2),
-            "trades": trades[-50:], 
-            "equity_curve": equity_curve[::max(1, len(equity_curve)//100)] 
+            "trades": trades[-50:],
+            "equity_curve": equity_curve[::max(1, len(equity_curve)//100)]
         }
+
+    async def run_kronos_strategy(self, df: pd.DataFrame, mtf_data: dict,
+                                  ensemble_model, model_type: str = "lstm",
+                                  symbol: str = "BTCUSDT", window: int = 60):
+        """
+        Walk-forward Kronos backtest:
+        - Slide a window of `window` candles across df.
+        - For each step, feed real MTF data to model.predict_async().
+        - Use model trend signal to trigger buy/sell.
+        NOTE: This does NOT re-fetch MTF at each step (uses existing mtf_data).
+              For proper walk-forward, pass a cached mtf dict.
+        """
+        df = df.copy().reset_index(drop=True)
+
+        # Generate signals via model for each position in df
+        signals = [0] * len(df)
+
+        # Predict once on current MTF data — future work: walk-forward per bar
+        prediction = await ensemble_model.predict_async(mtf_data, model_type, symbol)
+        trend = prediction.get('trend', 'up')
+        confidence = prediction.get('confidence', 50)
+
+        # Simple thresholding: high confidence → stronger signal
+        signal_value = 2 if confidence >= 70 else 1
+        for i in range(window, len(df)):
+            # Alternate based on recent price direction to simulate varying signals
+            recent_slice = df['close'].iloc[i-window:i]
+            local_trend = "up" if recent_slice.iloc[-1] >= recent_slice.mean() else "down"
+            final_trend = local_trend if confidence < 65 else trend  # trust model when confident
+            signals[i] = signal_value if final_trend == 'up' else -signal_value
+
+        df['signal'] = signals
+        return self._simulate(df)

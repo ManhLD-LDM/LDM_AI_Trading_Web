@@ -54,14 +54,14 @@ app.add_middleware(SlowAPIMiddleware)
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 app.include_router(paper.router, prefix="/api/paper", tags=["Paper Trading"])
 
-origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=".*",
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
 )
 
 class ConnectionManager:

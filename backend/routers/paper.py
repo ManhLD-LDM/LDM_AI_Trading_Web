@@ -11,6 +11,7 @@ from auth import get_current_user
 from database import get_database, db
 from datetime import datetime, timezone
 from bson import ObjectId
+from risk_manager import default_risk_manager, get_user_risk_state, RiskConfig, RiskManager
 
 router = APIRouter()
 
@@ -74,28 +75,47 @@ async def execute_paper_trade(req: PaperTradeRequest, current_user_email: str = 
     fee = req.price * req.quantity * TAKER_FEE
     pnl: float | None = None
 
+    # ── Risk check before execution ───────────────────────────────────────────
+    risk_state = get_user_risk_state(current_user_email)
+    risk_result = default_risk_manager.check(
+        symbol=req.symbol,
+        action=req.action,
+        quantity=req.quantity,
+        price=req.price,
+        balance=balance,
+        positions=positions,
+        state=risk_state,
+    )
+    if not risk_result.allowed:
+        raise HTTPException(status_code=400, detail=f"Risk check failed: {risk_result.reason}")
+
+    # Use potentially-adjusted quantity (position was capped)
+    quantity = risk_result.adjusted_quantity if risk_result.adjusted_quantity else req.quantity
+    fee = req.price * quantity * TAKER_FEE
+
     if req.action == "buy":
-        cost = req.price * req.quantity + fee
+        cost = req.price * quantity + fee
         if balance < cost:
             raise HTTPException(status_code=400, detail=f"Insufficient balance: need {cost:.2f}, have {balance:.2f}")
         balance -= cost
         pos = positions.get(req.symbol, {"quantity": 0.0, "avg_price": 0.0})
-        new_qty = pos["quantity"] + req.quantity
-        new_avg = ((pos["quantity"] * pos["avg_price"]) + (req.quantity * req.price)) / new_qty
+        new_qty = pos["quantity"] + quantity
+        new_avg = ((pos["quantity"] * pos["avg_price"]) + (quantity * req.price)) / new_qty
         positions[req.symbol] = {"quantity": round(new_qty, 8), "avg_price": round(new_avg, 4)}
 
     elif req.action == "sell":
         pos = positions.get(req.symbol)
-        if not pos or pos["quantity"] < req.quantity - 1e-9:
-            raise HTTPException(status_code=400, detail=f"Insufficient position: need {req.quantity}, have {pos['quantity'] if pos else 0}")
-        revenue = req.price * req.quantity - fee
-        pnl = round((req.price - pos["avg_price"]) * req.quantity - fee, 4)
+        if not pos or pos["quantity"] < quantity - 1e-9:
+            raise HTTPException(status_code=400, detail=f"Insufficient position: need {quantity}, have {pos['quantity'] if pos else 0}")
+        revenue = req.price * quantity - fee
+        pnl = round((req.price - pos["avg_price"]) * quantity - fee, 4)
         balance += revenue
-        remaining = round(pos["quantity"] - req.quantity, 8)
+        remaining = round(pos["quantity"] - quantity, 8)
         if remaining <= 1e-9:
             del positions[req.symbol]
         else:
             positions[req.symbol]["quantity"] = remaining
+
 
     col_users = get_database()["users"]
     await col_users.update_one(
@@ -103,12 +123,15 @@ async def execute_paper_trade(req: PaperTradeRequest, current_user_email: str = 
         {"$set": {"paper_balance": round(balance, 4), "paper_positions": positions}}
     )
 
+    # Update risk state after trade
+    default_risk_manager.update_after_trade(risk_state, pnl, round(balance, 4), positions)
+
     trade_record = {
         "email": current_user_email,
         "symbol": req.symbol,
         "action": req.action,
         "price": req.price,
-        "quantity": req.quantity,
+        "quantity": quantity,
         "fee": round(fee, 4),
         "pnl": pnl,
         "timestamp": datetime.now(timezone.utc)
@@ -193,4 +216,22 @@ async def reset_portfolio(current_user_email: str = Depends(get_current_user)):
         "balance": INITIAL_BALANCE,
         "positions": {},
         "deleted_trades": deleted.deleted_count
+    }
+
+
+@router.get("/risk-status")
+async def get_risk_status(current_user_email: str = Depends(get_current_user)):
+    """Returns current risk manager state for the user (consecutive losses, drawdown, halt status)."""
+    state = get_user_risk_state(current_user_email)
+    cfg = default_risk_manager.config
+    return {
+        "trading_halted": state.trading_halted,
+        "halt_reason": state.halt_reason,
+        "consecutive_losses": state.consecutive_losses,
+        "max_consecutive_losses": cfg.max_consecutive_losses,
+        "daily_pnl": round(state.daily_pnl, 4),
+        "daily_loss_limit_pct": cfg.daily_loss_limit_pct,
+        "peak_equity": round(state.peak_equity, 4),
+        "max_drawdown_pct": cfg.max_drawdown_pct,
+        "signal_cooldown_seconds": cfg.signal_cooldown_seconds,
     }

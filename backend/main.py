@@ -241,10 +241,29 @@ async def save_drawings(symbol: str, drawing: DrawingData, interval: str = "1m",
     return {"status": "success"}
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: str = None):
-    if not token:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    Auth flow: Client connect → sends {"type":"auth","token":"..."} within 5s
+    → if valid, joins broadcast group and receives AI signals.
+    """
+    await websocket.accept()
+
+    # Step 1: Wait for auth message (5 second timeout)
+    try:
+        auth_data = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
+    except asyncio.TimeoutError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Auth timeout")
         return
+    except Exception:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Bad auth message")
+        return
+
+    if auth_data.get("type") != "auth":
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Expected auth message first")
+        return
+
+    # Step 2: Validate token
+    token = auth_data.get("token", "")
     try:
         from auth import SECRET_KEY, ALGORITHM
         from jose import jwt, JWTError
@@ -252,15 +271,20 @@ async def websocket_endpoint(websocket: WebSocket, token: str = None):
         if not payload.get("sub"):
             raise JWTError()
     except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
         return
 
+    # Step 3: Join broadcast group
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            msg = await websocket.receive_text()
+            # Handle ping from client to keep connection alive
+            if msg == '{"type":"ping"}':
+                await websocket.send_text('{"type":"pong"}')
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
 
 class AnalysisRequest(BaseModel):
     symbol: str

@@ -22,45 +22,80 @@ interface SidebarProps {
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
   const [events, setEvents] = useState<AIEvent[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
   const scrollRef = useRef<HTMLDivElement>(null);
   
   const { pair, interval, addSignal, token } = useTradingStore();
 
   useEffect(() => {
-    if (!token) return; // Don't connect without auth
-    
-    // Connect to backend WebSocket
-    const host = window.location.hostname;
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `ws://${host}:8000/ws`;
-    const ws = new WebSocket(`${wsUrl}?token=${token}`);
-    
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === 'ai_log') {
-          const timestamp = new Date().toLocaleTimeString();
-          setEvents(prev => [...prev, { ...data, timestamp }]);
-          
-          // Add marker to chart if Trader Agent made a decision
-          if (data.agent_name === 'Trader Agent' && data.action && data.action !== 'HOLD') {
-            addSignal({
-              time: (data.timestamp || (new Date().getTime() / 1000)) as UTCTimestamp,
-              position: data.action === 'BUY' ? 'belowBar' : 'aboveBar',
-              color: data.action === 'BUY' ? '#10b981' : '#ef4444',
-              shape: data.action === 'BUY' ? 'arrowUp' : 'arrowDown',
-              text: `${data.action} @ ${data.price || ''}`,
-            });
+    if (!token) return;
+
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout>;
+    let pingTimer: ReturnType<typeof setInterval>;
+    let isDestroyed = false;
+
+    const connect = () => {
+      if (isDestroyed) return;
+      const host = window.location.hostname;
+      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `ws://${host}:8000/ws`;
+      ws = new WebSocket(wsUrl); // No token in URL
+      setConnectionStatus('connecting');
+
+      ws.onopen = () => {
+        // Send auth message immediately after connect
+        ws!.send(JSON.stringify({ type: 'auth', token }));
+        setConnectionStatus('connected');
+        // Ping every 30s to keep connection alive
+        pingTimer = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }));
           }
+        }, 30000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'pong') return; // Ignore ping responses
+          if (data.type === 'ai_log') {
+            const timestamp = new Date().toLocaleTimeString();
+            setEvents(prev => [...prev.slice(-200), { ...data, timestamp }]);
+            
+            if (data.agent_name === 'Trader Agent' && data.action && data.action !== 'HOLD') {
+              addSignal({
+                time: (data.timestamp || (new Date().getTime() / 1000)) as UTCTimestamp,
+                position: data.action === 'BUY' ? 'belowBar' : 'aboveBar',
+                color: data.action === 'BUY' ? '#10b981' : '#ef4444',
+                shape: data.action === 'BUY' ? 'arrowUp' : 'arrowDown',
+                text: `${data.action} @ ${data.price || ''}`,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Failed to parse ws message", e);
         }
-      } catch (e) {
-        console.error("Failed to parse ws message", e);
-      }
+      };
+
+      ws.onclose = () => {
+        clearInterval(pingTimer);
+        setConnectionStatus('disconnected');
+        if (!isDestroyed) {
+          reconnectTimer = setTimeout(connect, 3000); // Auto-reconnect after 3s
+        }
+      };
+      ws.onerror = () => ws?.close();
     };
 
+    connect();
+
     return () => {
-      ws.close();
+      isDestroyed = true;
+      clearTimeout(reconnectTimer);
+      clearInterval(pingTimer);
+      ws?.close();
     };
-  }, [addSignal]);
+  }, [token, addSignal]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -157,9 +192,16 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           </div>
           <div className="flex justify-between items-center text-xs">
             <span className="text-slate-400">Connection</span>
-            <span className="text-emerald-400 font-medium flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              Secure
+            <span className={`font-medium flex items-center gap-1.5 ${
+              connectionStatus === 'connected' ? 'text-emerald-400' :
+              connectionStatus === 'connecting' ? 'text-amber-400' : 'text-rose-400'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                connectionStatus === 'connected' ? 'bg-emerald-500' :
+                connectionStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'
+              }`} />
+              {connectionStatus === 'connected' ? 'Secure' :
+               connectionStatus === 'connecting' ? 'Connecting...' : 'Reconnecting...'}
             </span>
           </div>
         </div>

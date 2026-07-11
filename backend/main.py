@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, field_validator, Field
 from contextlib import asynccontextmanager
 from logger import main_logger
+from alert_manager import alert_manager
 
 from database import connect_to_mongo, close_mongo_connection, db, get_database
 from binance_api import get_historical_klines, get_mtf_klines
@@ -399,6 +400,16 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
             "timestamp": int(history_data[-1][0] / 1000)
         }))
 
+        # Fire alert for actionable signals
+        await alert_manager.send_signal_alert(
+            symbol=symbol,
+            action=decision.get('action', 'HOLD'),
+            price=current_price,
+            confidence=float(decision.get('confidence', 50)),
+            reason=str(decision.get('reason', ''))[:300],
+            model_type=model_type.upper(),
+        )
+
         # Store in DB
         if db.client:
             collection = get_database()["trade_signals"]
@@ -412,3 +423,4 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
             })
     except Exception as e:
         main_logger.error(f"[{symbol}] Analysis error: {e}")
+        await alert_manager.send_error_alert(f"Analysis [{symbol}/{interval}]", str(e))

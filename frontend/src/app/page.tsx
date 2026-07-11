@@ -5,16 +5,18 @@ import Sidebar from '@/components/Sidebar';
 import Toolbar from '@/components/Toolbar';
 import PaperTradingDashboard from '@/components/PaperTradingDashboard';
 import BacktestPanel from '@/components/BacktestPanel';
-import { LineChart, History, Settings, User, LogOut, FlaskConical } from 'lucide-react';
+import LiveTradingDashboard from '@/components/LiveTradingDashboard';
+import { LineChart, History, Settings, User, LogOut, FlaskConical, Zap } from 'lucide-react';
 import AuthModal from '@/components/AuthModal';
 import { useTradingStore } from '@/store/useStore';
 import { TradingAPI } from '@/lib/api';
 
-type Tab = 'live' | 'paper' | 'backtest' | 'settings';
+type Tab = 'live' | 'paper' | 'live-trade' | 'backtest' | 'settings';
 
 const NAV_ITEMS: Array<{ id: Tab; icon: React.ReactNode; label: string; requiresAuth: boolean }> = [
   { id: 'live', icon: <LineChart size={22} strokeWidth={1.5} />, label: 'Live', requiresAuth: false },
   { id: 'paper', icon: <FlaskConical size={22} strokeWidth={1.5} />, label: 'Paper', requiresAuth: true },
+  { id: 'live-trade', icon: <Zap size={22} strokeWidth={1.5} />, label: 'Live Trade', requiresAuth: true },
   { id: 'backtest', icon: <History size={22} strokeWidth={1.5} />, label: 'Backtest', requiresAuth: true },
   { id: 'settings', icon: <Settings size={22} strokeWidth={1.5} />, label: 'Settings', requiresAuth: true },
 ];
@@ -162,6 +164,9 @@ export default function Home() {
 
         {/* Tab: Paper Trading */}
         {activeTab === 'paper' && <PaperTradingDashboard />}
+
+        {/* Tab: Live Trading */}
+        {activeTab === 'live-trade' && <LiveTradingDashboard />}
 
         {/* Tab: Backtest */}
         {activeTab === 'backtest' && <BacktestPanel />}

@@ -29,7 +29,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
 
-from routers import backtest, paper
+from routers import backtest, paper, live_trading
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -56,6 +56,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # are handled by CORS before rate-limit checks run.
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 app.include_router(paper.router, prefix="/api/paper", tags=["Paper Trading"])
+app.include_router(live_trading.router, prefix="/api/live", tags=["Live Trading"])
 
 # Validation constants
 VALID_SYMBOL_RE = re.compile(r'^[A-Z]{2,20}$')
@@ -456,3 +457,77 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
     except Exception as e:
         main_logger.error(f"[{symbol}] Analysis error: {e}")
         await alert_manager.send_error_alert(f"Analysis [{symbol}/{interval}]", str(e))
+
+
+# ─── Binance API Key Management ───────────────────────────────────────────────
+
+class BinanceKeysRequest(BaseModel):
+    api_key: str = Field(..., min_length=10, description="Binance API Key")
+    api_secret: str = Field(..., min_length=10, description="Binance API Secret")
+
+
+@app.post("/api/user/binance-keys")
+@limiter.limit("5/minute")
+async def save_binance_keys(
+    request: Request,
+    keys: BinanceKeysRequest,
+    current_user_email: str = Depends(get_current_user),
+):
+    """
+    Lưu Binance API keys đã được mã hóa vào MongoDB.
+    Keys được encrypt bằng Fernet/PBKDF2 trước khi lưu.
+    """
+    if not is_connected():
+        raise HTTPException(503, "Database unavailable")
+
+    from exchange.key_manager import encrypt_key, verify_key_pair
+
+    if not verify_key_pair(keys.api_key, keys.api_secret):
+        raise HTTPException(
+            400,
+            "Invalid Binance key format. Keys must be alphanumeric and at least 40 characters."
+        )
+
+    try:
+        enc_key = encrypt_key(keys.api_key)
+        enc_secret = encrypt_key(keys.api_secret)
+    except RuntimeError as e:
+        raise HTTPException(500, f"Encryption error: {e}")
+
+    collection = get_database()["users"]
+    await collection.update_one(
+        {"email": current_user_email},
+        {"$set": {
+            "binance_api_key": enc_key,
+            "binance_api_secret": enc_secret,
+            "binance_keys_updated_at": datetime.now(timezone.utc),
+        }},
+    )
+    return {"status": "success", "message": "Binance API keys saved securely (Fernet encrypted)"}
+
+
+@app.get("/api/user/binance-keys/status")
+async def get_binance_keys_status(current_user_email: str = Depends(get_current_user)):
+    """Check nếu user đã có Binance API keys (không trả về key thực)."""
+    if not is_connected():
+        return {"has_keys": False, "mock": True}
+    collection = get_database()["users"]
+    user = await collection.find_one({"email": current_user_email})
+    has_keys = bool(user and user.get("binance_api_key"))
+    updated_at = None
+    if has_keys and user.get("binance_keys_updated_at"):
+        updated_at = user["binance_keys_updated_at"].isoformat()
+    return {"has_keys": has_keys, "updated_at": updated_at}
+
+
+@app.delete("/api/user/binance-keys")
+async def delete_binance_keys(current_user_email: str = Depends(get_current_user)):
+    """Xóa Binance API keys khỏi DB."""
+    if not is_connected():
+        raise HTTPException(503, "Database unavailable")
+    collection = get_database()["users"]
+    await collection.update_one(
+        {"email": current_user_email},
+        {"$unset": {"binance_api_key": "", "binance_api_secret": "", "binance_keys_updated_at": ""}},
+    )
+    return {"status": "success", "message": "Binance API keys removed"}

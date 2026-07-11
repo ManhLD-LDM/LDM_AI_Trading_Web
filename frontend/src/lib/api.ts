@@ -143,4 +143,45 @@ export const TradingAPI = {
   // Backtest
   runBacktest: (payload: { strategy: string; symbol: string; interval: string; limit?: number; model_type?: string }, token: string) =>
     apiPost('/api/backtest/run', payload, token),
+
+  // Live Trading
+  liveBuy: (payload: {
+    symbol: string;
+    usdt_amount: number;
+    stop_loss_pct?: number;
+    take_profit_pct?: number;
+    testnet?: boolean;
+    ai_confidence?: number;
+  }, token: string) => apiPost('/api/live/buy', payload, token),
+
+  liveSell: (payload: {
+    symbol: string;
+    quantity: number;
+    testnet?: boolean;
+  }, token: string) => apiPost('/api/live/sell', payload, token),
+
+  getLiveBalance: (testnet: boolean, token: string) =>
+    apiGet(`/api/live/balance?testnet=${testnet}`, token),
+
+  getLiveOrders: (token: string, symbol?: string, testnet = true) => {
+    const qs = new URLSearchParams({ testnet: String(testnet) });
+    if (symbol) qs.set('symbol', symbol);
+    return apiGet(`/api/live/orders/open?${qs}`, token);
+  },
+
+  cancelOrders: (symbol: string, testnet: boolean, token: string) =>
+    apiDelete(`/api/live/orders/${symbol}?testnet=${testnet}`, token),
+
+  getLiveHistory: (token: string, limit = 50) =>
+    apiGet(`/api/live/history?limit=${limit}`, token),
+
+  // Binance Key Management
+  saveBinanceKeys: (apiKey: string, apiSecret: string, token: string) =>
+    apiPost('/api/user/binance-keys', { api_key: apiKey, api_secret: apiSecret }, token),
+
+  getBinanceKeysStatus: (token: string) =>
+    apiGet<{ has_keys: boolean; updated_at: string | null }>('/api/user/binance-keys/status', token),
+
+  deleteBinanceKeys: (token: string) =>
+    apiDelete('/api/user/binance-keys', token),
 };

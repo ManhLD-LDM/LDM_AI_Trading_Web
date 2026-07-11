@@ -50,26 +50,16 @@ const defaultIndicators: IndicatorConfig[] = [
 ];
 
 export const useTradingStore = create<TradingStore>()((set, get) => {
-  const syncPreferences = () => {
+  const syncPreferences = async () => {
     const state = get();
     if (state.token && typeof window !== 'undefined') {
-      const host = window.location.hostname;
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
-      
+      const { apiPut } = await import('@/lib/api');
       const preferences = {
         pair: state.pair,
         interval: state.interval,
         indicators: state.indicators
       };
-      
-      fetch(`${API_URL}/api/user/preferences`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${state.token}`
-        },
-        body: JSON.stringify(preferences)
-      }).catch(() => {});
+      apiPut('/api/user/preferences', preferences, state.token).catch(() => {});
     }
   };
 

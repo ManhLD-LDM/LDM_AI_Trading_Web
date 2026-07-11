@@ -7,10 +7,20 @@ from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr, Field
 
 # Configuration
-SECRET_KEY = os.getenv("JWT_SECRET_KEY")
-if not SECRET_KEY or SECRET_KEY == "generate_a_secure_random_key_here":
-    print("WARNING: No JWT_SECRET_KEY found. Using a static fallback key. Set JWT_SECRET_KEY in production.")
-    SECRET_KEY = "static_fallback_secret_key_for_development_purposes_only_replace_in_prod"
+import secrets as _secrets
+
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", "").strip()
+_PLACEHOLDER = "generate_a_secure_random_key_here"
+
+if not SECRET_KEY or SECRET_KEY == _PLACEHOLDER:
+    _env = os.getenv("ENVIRONMENT", "development").lower()
+    if _env == "production":
+        raise RuntimeError(
+            "FATAL: JWT_SECRET_KEY must be set in production!\n"
+            "Generate: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+    SECRET_KEY = _secrets.token_hex(32)
+    print("⚠️  JWT_SECRET_KEY not set. Using ephemeral random key (dev only). Sessions lost on restart.")
 
 ALGORITHM = "HS256"
 try:

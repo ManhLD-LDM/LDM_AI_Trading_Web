@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator
 from auth import get_current_user
 from database import get_database, is_connected
-from risk_manager import risk_manager
+from risk_manager import default_risk_manager, get_user_risk_state
 from alert_manager import alert_manager
 from datetime import datetime, timezone
 from logger import setup_logger
@@ -105,15 +105,25 @@ async def live_buy(req: LiveTradeRequest, current_user_email: str = Depends(get_
         if not is_connected():
             raise HTTPException(503, "DB required for risk check on live trades")
 
-        db = get_database()
-        allowed, reason = await risk_manager.check(
-            user_email=current_user_email,
-            usdt_amount=req.usdt_amount,
+        # Estimate quantity for check
+        current_price = await executor.get_current_price(req.symbol)
+        estimated_qty = req.usdt_amount / current_price if current_price > 0 else 0
+
+        # Load per-user risk state (in-memory session tracking)
+        state = get_user_risk_state(current_user_email)
+
+        result_risk = default_risk_manager.check(
+            symbol=req.symbol,
+            action="buy",
+            quantity=estimated_qty,
+            price=current_price,
             balance=usdt_balance,
+            positions={},
+            state=state,
         )
-        if not allowed:
-            logger.warning(f"[LIVE] Trade BLOCKED for {current_user_email}: {reason}")
-            raise HTTPException(400, f"Risk Manager blocked trade: {reason}")
+        if not result_risk.allowed:
+            logger.warning(f"[LIVE] Trade BLOCKED for {current_user_email}: {result_risk.reason}")
+            raise HTTPException(400, f"Risk Manager blocked trade: {result_risk.reason}")
 
     # ── Execute order ─────────────────────────────────────────────────────
     result = await executor.place_market_buy_with_oco(

@@ -51,16 +51,9 @@ export default function Toolbar({ onToggleAiSidebar }: { onToggleAiSidebar?: () 
   const handleAnalyzeAI = async () => {
     setIsAnalyzing(true);
     try {
-      const host = window.location.hostname;
-      const API_URL = process.env.NEXT_PUBLIC_API_URL || `http://${host}:8000`;
-      await fetch(`${API_URL}/api/analysis/run`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-        },
-        body: JSON.stringify({ symbol: pair, interval: interval, model_type: modelType })
-      });
+      if (!token) return;
+      const { TradingAPI } = await import('@/lib/api');
+      await TradingAPI.runAnalysis(pair, interval, modelType, token);
     } catch (err) {
       console.error("Failed to trigger AI analysis", err);
     } finally {

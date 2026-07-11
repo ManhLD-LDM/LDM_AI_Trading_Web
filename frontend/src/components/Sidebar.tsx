@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useTradingStore } from '@/store/useStore';
 import { UTCTimestamp } from 'lightweight-charts';
-
+import { getWsUrl } from '@/lib/api';
 import { X } from 'lucide-react';
 
 type AIEvent = {
@@ -37,8 +37,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
     const connect = () => {
       if (isDestroyed) return;
-      const host = window.location.hostname;
-      const wsUrl = process.env.NEXT_PUBLIC_WS_URL || `ws://${host}:8000/ws`;
+      const wsUrl = getWsUrl();
       ws = new WebSocket(wsUrl); // No token in URL
       setConnectionStatus('connecting');
 

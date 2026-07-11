@@ -52,8 +52,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="LDM AI Trading Backend", lifespan=lifespan)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
-
+# IMPORTANT: SlowAPI middleware is added AFTER CORS so OPTIONS preflights
+# are handled by CORS before rate-limit checks run.
 app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
 app.include_router(paper.router, prefix="/api/paper", tags=["Paper Trading"])
 
@@ -64,12 +64,16 @@ VALID_MODELS = {'lstm', 'xgboost', 'transformer', 'tcn'}
 
 origins = [o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")]
 
+# FastAPI middleware is LIFO: last added = outermost = runs first.
+# Order: SlowAPI (inner) → CORS (outer, runs first on inbound request)
+# This ensures OPTIONS preflight gets CORS headers before rate-limiting.
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-API-Key"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 class ConnectionManager:
@@ -163,24 +167,23 @@ async def read_users_me(current_user_email: str = Depends(get_current_user)):
     return {"email": user["email"], "preferences": user.get("preferences", {})}
 
 class UserPreferences(BaseModel):
-    theme: str | None = None
-    chartType: str | None = None
-    indicators: list | None = None
-    favoritePairs: list | None = None
-    interval: str | None = None
-    
-    class Config:
-        extra = "ignore"
+    """
+    Accept any fields the frontend sends — pair, interval, indicators,
+    settings (risk params, API keys), etc. Stored as-is in MongoDB.
+    """
+    model_config = {"extra": "allow"}
 
 @app.put("/api/user/preferences")
 async def update_preferences(preferences: UserPreferences, current_user_email: str = Depends(get_current_user)):
-    prefs_dict = preferences.model_dump(exclude_unset=True)
+    prefs_dict = preferences.model_dump()
     if not db.client:
         return {"status": "success", "preferences": prefs_dict, "mock": True}
     collection = get_database()["users"]
+    # Use $set with dot-notation merge so we don't overwrite unrelated prefs
+    update_fields = {f"preferences.{k}": v for k, v in prefs_dict.items()}
     await collection.update_one(
         {"email": current_user_email},
-        {"$set": {"preferences": prefs_dict}}
+        {"$set": update_fields}
     )
     return {"status": "success", "preferences": prefs_dict}
 
@@ -252,23 +255,26 @@ async def save_drawings(symbol: str, drawing: DrawingData, interval: str = "1m",
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """
-    Auth flow: Client connect → sends {"type":"auth","token":"..."} within 5s
-    → if valid, joins broadcast group and receives AI signals.
+    Auth flow:
+    1. Client connects
+    2. Client sends {"type":"auth","token":"<JWT>"} within 10s
+    3. If valid → joined to broadcast group
+    4. Client should send {"type":"ping"} every 30s to keep alive
     """
     await websocket.accept()
 
-    # Step 1: Wait for auth message (5 second timeout)
+    # Step 1: Wait for auth message
     try:
-        auth_data = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
+        auth_data = await asyncio.wait_for(websocket.receive_json(), timeout=10.0)
     except asyncio.TimeoutError:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Auth timeout")
+        await websocket.close(code=1008, reason="Auth timeout (10s)")
         return
     except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Bad auth message")
+        await websocket.close(code=1008, reason="Bad auth message")
         return
 
     if auth_data.get("type") != "auth":
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Expected auth message first")
+        await websocket.close(code=1008, reason="Expected auth message first")
         return
 
     # Step 2: Validate token
@@ -280,19 +286,35 @@ async def websocket_endpoint(websocket: WebSocket):
         if not payload.get("sub"):
             raise JWTError()
     except Exception:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+        await websocket.close(code=1008, reason="Invalid token")
         return
 
     # Step 3: Join broadcast group
     await manager.connect(websocket)
+    main_logger.info(f"WS connected: {payload.get('sub')}")
+
     try:
         while True:
-            msg = await websocket.receive_text()
-            # Handle ping from client to keep connection alive
-            if msg == '{"type":"ping"}':
-                await websocket.send_text('{"type":"pong"}')
+            try:
+                # Wait for ping/message with a timeout — auto-disconnect stale connections
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=90.0)
+                try:
+                    msg = json.loads(raw)
+                    if msg.get("type") == "ping":
+                        await websocket.send_text('{"type":"pong"}')
+                except json.JSONDecodeError:
+                    pass  # Ignore non-JSON messages
+            except asyncio.TimeoutError:
+                # No ping received in 90s — send server-side ping
+                try:
+                    await websocket.send_text('{"type":"ping"}')
+                except Exception:
+                    break  # Connection dead
     except WebSocketDisconnect:
+        pass
+    finally:
         manager.disconnect(websocket)
+        main_logger.info(f"WS disconnected: {payload.get('sub')}")
 
 
 class AnalysisRequest(BaseModel):

@@ -141,13 +141,22 @@ class ModelEnsemble:
             return self.models[key]
 
         if model_type == "xgboost":
-            path = os.path.join(self.models_dir, f"xgboost_{asset_class}.json")
-            if os.path.exists(path) and xgb is not None:
+            # Try native XGBoost .json first
+            json_path = os.path.join(self.models_dir, f"xgboost_{asset_class}.json")
+            if os.path.exists(json_path) and xgb is not None:
                 bst = xgb.Booster()
-                bst.load_model(path)
+                bst.load_model(json_path)
                 self.models[key] = bst
-                model_logger.info(f"Loaded {key} from {path}")
+                model_logger.info(f"Loaded XGBoost (native) from {json_path}")
                 return bst
+            # Fall back to ONNX export of XGBoost
+            onnx_path = os.path.join(self.models_dir, f"xgboost_{asset_class}.onnx")
+            if os.path.exists(onnx_path) and ort is not None:
+                session = ort.InferenceSession(onnx_path, providers=['CPUExecutionProvider'])
+                self.models[key] = session
+                model_logger.info(f"Loaded XGBoost (ONNX) from {onnx_path}")
+                return session
+            model_logger.warning(f"XGBoost model not found for {asset_class} (tried .json and .onnx)")
         else:
             path = os.path.join(self.models_dir, f"{model_type}_{asset_class}.onnx")
             if os.path.exists(path) and ort is not None:
@@ -201,16 +210,33 @@ class ModelEnsemble:
             full_features = await asyncio.to_thread(_build_mtf_features, mtf_data)
 
             if model_type == "xgboost":
-                X_xgb = full_features.reshape(1, SEQ_LEN * 65)
-                dmatrix = xgb.DMatrix(X_xgb)
-                pred_raw = await asyncio.to_thread(model.predict, dmatrix)
-                prob = float(pred_raw[0])
+                # XGBoost: try .json first, fall back to ONNX session
+                X_flat = full_features.reshape(1, SEQ_LEN * 65)
+                if xgb is not None and hasattr(model, 'predict'):
+                    # Native XGBoost booster (.json)
+                    dmatrix = xgb.DMatrix(X_flat)
+                    pred_raw = await asyncio.to_thread(model.predict, dmatrix)
+                    prob = float(pred_raw[0])
+                else:
+                    # ONNX session fallback
+                    input_name = model.get_inputs()[0].name
+                    ort_outs = await asyncio.to_thread(model.run, None, {input_name: X_flat})
+                    raw_out = ort_outs[0].flatten()
+                    prob = float(raw_out[-1])  # last value = probability of class 1
             else:
+                # LSTM / TCN / Transformer — ONNX, input shape [1, 60, 65]
                 input_name = model.get_inputs()[0].name
                 X_dl = full_features.reshape(1, SEQ_LEN, 65)
                 ort_outs = await asyncio.to_thread(model.run, None, {input_name: X_dl})
-                pred = ort_outs[0][0]
-                prob = float(pred[1]) if len(pred) > 1 else float(pred[0])
+                raw_out = ort_outs[0].flatten()
+                if len(raw_out) == 1:
+                    # Sigmoid output: single value in [0,1]
+                    prob = float(raw_out[0])
+                elif len(raw_out) == 2:
+                    # Softmax output: [p_class0, p_class1]
+                    prob = float(raw_out[1])
+                else:
+                    prob = float(raw_out[-1])
 
             trend = "up" if prob >= 0.5 else "down"
             confidence = round(max(prob, 1 - prob) * 100, 2)
@@ -219,8 +245,10 @@ class ModelEnsemble:
                 "status": "success",
                 "trend": trend,
                 "confidence": confidence,
-                "reason": f"{model_type.upper()} MTF prediction for {symbol} ({N_TIMEFRAMES} timeframes)."
+                "model_type": model_type,
+                "reason": f"{model_type.upper()} MTF prediction for {symbol} ({N_TIMEFRAMES} timeframes). p={prob:.4f}",
             }
+
         except Exception as e:
             model_logger.error(f"Prediction error [{model_type}/{symbol}]: {e}")
             return {

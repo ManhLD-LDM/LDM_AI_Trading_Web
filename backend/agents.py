@@ -4,6 +4,7 @@ from google.genai import types
 import httpx
 import asyncio
 import json
+import math
 from dotenv import load_dotenv
 from logger import agent_logger
 
@@ -17,20 +18,41 @@ if GEMINI_API_KEY:
 
 FALLBACK_MODEL = "gemini-2.0-flash"  # Khi Gemma 500, dùng Gemini làm fallback
 
+
+def calculate_atr(candles: list, period: int = 14) -> float:
+    """Tính chỉ số ATR (Average True Range) từ danh sách nến [[ts, open, high, low, close, vol], ...]"""
+    if not candles or len(candles) < 2:
+        return 10.0
+    
+    true_ranges = []
+    for i in range(1, len(candles)):
+        high = float(candles[i][2])
+        low = float(candles[i][3])
+        prev_close = float(candles[i - 1][4])
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        true_ranges.append(tr)
+    
+    recent_tr = true_ranges[-period:] if len(true_ranges) >= period else true_ranges
+    return sum(recent_tr) / len(recent_tr) if recent_tr else 10.0
+
+
+def calculate_swing_levels(candles: list, window: int = 20) -> tuple[float, float]:
+    """Tính mốc Swing Low và Swing High của 20 nến gần nhất"""
+    if not candles:
+        return 0.0, 0.0
+    
+    recent = candles[-window:]
+    lows = [float(c[3]) for c in recent]
+    highs = [float(c[2]) for c in recent]
+    return min(lows), max(highs)
+
+
 async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: str = "text/plain") -> str:
-    """Gọi Gemma API bất đồng bộ.
-    
-    Primary: gemma-4-31b-it (3 lần retry, exponential backoff)
-    Fallback: gemini-2.0-flash (khi Gemma fail hết)
-    
-    Lưu ý: Gemma không support response_mime_type='application/json' → luôn dùng text/plain với Gemma.
-    Gemini hỗ trợ application/json → dùng đúng mime type khi fallback.
-    """
+    """Gọi Gemma / Gemini API bất đồng bộ với retry & fallback."""
     if not client:
         return "MOCK_RESPONSE: Missing Gemini API Key"
 
     prompt = f"{system_prompt}\n\nUSER INPUT:\n{user_prompt}"
-    last_error = None
 
     # --- Primary: Gemma ---
     for attempt in range(3):
@@ -40,15 +62,14 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
                 model='gemma-4-31b-it',
                 contents=prompt,
                 config=types.GenerateContentConfig(
-                    response_mime_type="text/plain",  # Gemma chỉ support text/plain
+                    response_mime_type="text/plain",
                 ),
             )
             return response.text
         except Exception as e:
-            last_error = e
             agent_logger.warning(f"Gemma API attempt {attempt + 1}/3 failed: {e}")
             if attempt < 2:
-                await asyncio.sleep(2 ** attempt)  # 1s → 2s
+                await asyncio.sleep(2 ** attempt)
 
     # --- Fallback: Gemini ---
     agent_logger.warning(f"Gemma failed after 3 attempts — falling back to {FALLBACK_MODEL}")
@@ -58,54 +79,79 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
             model=FALLBACK_MODEL,
             contents=prompt,
             config=types.GenerateContentConfig(
-                response_mime_type=response_mime_type,  # Gemini hỗ trợ JSON mode đúng chuẩn
+                response_mime_type=response_mime_type,
             ),
         )
         agent_logger.info(f"Fallback to {FALLBACK_MODEL} succeeded.")
         return response.text
     except Exception as fallback_err:
         agent_logger.error(f"Fallback {FALLBACK_MODEL} also failed: {fallback_err}")
-        if response_mime_type == "application/json":
-            return json.dumps({"action": "HOLD", "reason": f"API Error: {str(fallback_err)[:100]}", "confidence": 50})
         return f"ERROR: {str(fallback_err)}"
 
 
 class TechnicalAgent:
     async def analyze(self, kronos_prediction: dict, recent_candles: list, interval: str) -> str:
-        sys_prompt = "Bạn là Technical Analyst. Hãy phân tích dự đoán từ model lượng tử (Kronos) và dữ liệu nến gần nhất. PHẦN PHÂN TÍCH PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
-        candles_str = "\n".join([f"Open: {c[1]}, High: {c[2]}, Low: {c[3]}, Close: {c[4]}, Vol: {c[5]}" for c in recent_candles])
-        user_prompt = f"Khung thời gian (Timeframe): {interval}\nKronos dự báo trend: {kronos_prediction.get('trend')} với độ tin cậy {kronos_prediction.get('confidence')}%. \n{len(recent_candles)} nến gần nhất:\n{candles_str}"
+        sys_prompt = "Bạn là Technical Analyst chuyên nghiệp. Hãy đọc dữ liệu nến và dự báo xu hướng. PHẦN PHÂN TÍCH PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
+        candles_str = "\n".join([f"Open: {c[1]}, High: {c[2]}, Low: {c[3]}, Close: {c[4]}, Vol: {c[5]}" for c in recent_candles[-10:]])
+        user_prompt = f"Timeframe: {interval}\nKronos Quantum Trend: {kronos_prediction.get('trend')} (Confidence: {kronos_prediction.get('confidence')}%)\n10 nến gần nhất:\n{candles_str}"
         return await call_agent(sys_prompt, user_prompt)
 
 
 class SentimentAgent:
     async def analyze(self, symbol: str) -> str:
-        sys_prompt = "Bạn là Sentiment Analyst. Dựa vào tin tức tiêu đề, hãy đánh giá tâm lý thị trường (Bullish, Bearish hay Neutral). PHẦN ĐÁNH GIÁ PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
-
+        sys_prompt = "Bạn là Sentiment Analyst. Đánh giá tin tức thị trường và cộng đồng. PHẦN ĐÁNH GIÁ PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
         from news_analyzer import fetch_crypto_news
         news = await fetch_crypto_news(symbol)
-
         user_prompt = f"Tin tức gần đây về {symbol}:\n{news}"
         return await call_agent(sys_prompt, user_prompt)
 
 
 class TraderAgent:
-    async def decide(self, tech_analysis: str, sentiment_analysis: str, interval: str) -> dict:
-        sys_prompt = (
-            f"Bạn là Master Trader giao dịch trên khung thời gian {interval}. "
-            "Hãy đưa ra quyết định BUY, SELL hoặc HOLD dựa trên phân tích kỹ thuật và tâm lý. "
-            "Khung thời gian nhỏ (1m, 5m, 15m) thì ưu tiên lướt sóng, khung thời gian lớn (1h, 4h, 1d) thì đánh theo xu hướng. "
-            "Trả về ĐÚNG MỘT object JSON chứa action (BUY/SELL/HOLD), reason và confidence (0-100). "
-            "KHÔNG TRẢ VỀ BẤT KỲ VĂN BẢN NÀO KHÁC NGOÀI JSON. "
-            "LƯU Ý: Trường 'reason' TRONG JSON PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
-        )
-        user_prompt = f"Khung thời gian giao dịch: {interval}\n\nKỹ thuật:\n{tech_analysis}\n\nTâm lý:\n{sentiment_analysis}"
+    async def consult(
+        self,
+        symbol: str,
+        interval: str,
+        current_price: float,
+        candles: list,
+        kronos_prediction: dict,
+        tech_analysis: str,
+        sentiment_analysis: str,
+    ) -> dict:
+        """Lập Kế hoạch Cố vấn Trading hoàn chỉnh (AI Trading Blueprint)."""
+        atr = calculate_atr(candles, 14)
+        swing_low, swing_high = calculate_swing_levels(candles, 20)
 
-        # Gemma không support response_mime_type="application/json" → gọi text/plain, parse thủ công
+        sys_prompt = (
+            f"Bạn là Master AI Trading Consultant (Cố vấn Giao dịch Chuyên nghiệp). "
+            f"Tài sản: {symbol} | Timeframe: {interval} | Giá hiện tại: {current_price}. "
+            f"Chỉ số ATR(14) = {atr:.2f}. Mốc Swing Low 20 nến = {swing_low:.2f}, Swing High = {swing_high:.2f}. "
+            "Dựa trên phân tích kỹ thuật và tin tức, hãy lập một Kế hoạch Giao dịch Vị thế (Trading Blueprint) hoàn chỉnh. "
+            "Trả về ĐÚNG MỘT OBJECT JSON duy nhất không chứa bất kỳ văn bản nào khác ngoài JSON theo đúng định dạng:\n"
+            "{\n"
+            '  "recommendation": "LONG" | "SHORT" | "WAIT",\n'
+            '  "confidence": 85,\n'
+            '  "entryZone": {"minPrice": float, "maxPrice": float, "idealEntry": float},\n'
+            '  "stopLoss": {"price": float, "percentage": float, "rationale": "Lý do bằng Tiếng Việt"},\n'
+            '  "takeProfit": [\n'
+            '    {"level": "TP1 (50% Vị thế)", "price": float, "rrRatio": "1:1.5", "closePct": 50},\n'
+            '    {"level": "TP2 (Chốt hết)", "price": float, "rrRatio": "1:2.5", "closePct": 50}\n'
+            '  ],\n'
+            '  "riskRewardRatio": 2.2,\n'
+            '  "suggestedLeverage": "5x - 10x Cross",\n'
+            '  "recommendedRiskPct": 1.5,\n'
+            '  "analysisSummary": {\n'
+            '    "candlestickPattern": "Lý do đọc nến bằng Tiếng Việt",\n'
+            '    "technicalConfluence": "Chỉ số kỹ thuật bằng Tiếng Việt",\n'
+            '    "newsSentiment": "Tâm lý tin tức bằng Tiếng Việt",\n'
+            '    "keyWarning": "Cảnh báo sự kiện/biến động bằng Tiếng Việt"\n'
+            '  }\n'
+            "}"
+        )
+
+        user_prompt = f"Phân tích kỹ thuật:\n{tech_analysis}\n\nPhân tích tâm lý tin tức:\n{sentiment_analysis}"
         response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="text/plain")
 
         try:
-            # Xử lý chuỗi JSON khi Gemma bọc trong ```json ... ``` markdown
             clean_text = response_text.strip()
             if clean_text.startswith("```json"):
                 clean_text = clean_text[7:]
@@ -114,19 +160,54 @@ class TraderAgent:
             if clean_text.endswith("```"):
                 clean_text = clean_text[:-3]
 
-            decision = json.loads(clean_text.strip())
-            return {
-                "action": decision.get("action", "HOLD").upper(),
-                "reason": decision.get("reason", "No reason provided"),
-                "confidence": int(decision.get("confidence", 80))
-            }
+            plan = json.loads(clean_text.strip())
+            # Basic key validation
+            if "recommendation" in plan and "entryZone" in plan and "stopLoss" in plan:
+                plan["symbol"] = symbol
+                plan["interval"] = interval
+                return plan
         except Exception as e:
-            agent_logger.warning(f"TraderAgent JSON parse failed (fallback HOLD): {e}. Raw: {response_text[:100]}")
-            return {
-                "action": "HOLD",
-                "reason": response_text,
-                "confidence": 80
-            }
+            agent_logger.warning(f"TraderAgent consult JSON parse failed: {e}. Generating math-anchored fallback plan.")
+
+        # Fallback Plan mathematically calculated using ATR and Swing levels
+        is_long = kronos_prediction.get("trend") != "DOWN"
+        rec = "LONG" if is_long else "SHORT"
+        
+        sl_price = round(current_price - 1.5 * atr, 2) if is_long else round(current_price + 1.5 * atr, 2)
+        sl_pct = round(abs(current_price - sl_price) / current_price * 100, 2)
+        
+        tp1_price = round(current_price + (current_price - sl_price) * 1.5, 2) if is_long else round(current_price - (sl_price - current_price) * 1.5, 2)
+        tp2_price = round(current_price + (current_price - sl_price) * 2.5, 2) if is_long else round(current_price - (sl_price - current_price) * 2.5, 2)
+
+        return {
+            "symbol": symbol,
+            "interval": interval,
+            "recommendation": rec,
+            "confidence": kronos_prediction.get("confidence", 80),
+            "entryZone": {
+                "minPrice": round(current_price * (0.998 if is_long else 1.001), 2),
+                "maxPrice": round(current_price * (1.002 if is_long else 1.003), 2),
+                "idealEntry": current_price,
+            },
+            "stopLoss": {
+                "price": sl_price,
+                "percentage": sl_pct,
+                "rationale": f"Đặt dưới mốc hỗ trợ ATR({atr:.2f}) và Swing Low gần nhất ({swing_low:.2f})." if is_long else f"Đặt trên mốc kháng cự ATR({atr:.2f}) và Swing High gần nhất ({swing_high:.2f}).",
+            },
+            "takeProfit": [
+                {"level": "TP1 (50% Vị thế)", "price": tp1_price, "rrRatio": "1:1.5", "closePct": 50},
+                {"level": "TP2 (Chốt hết)", "price": tp2_price, "rrRatio": "1:2.5", "closePct": 50},
+            ],
+            "riskRewardRatio": 2.2,
+            "suggestedLeverage": "5x - 10x Cross",
+            "recommendedRiskPct": 1.5,
+            "analysisSummary": {
+                "candlestickPattern": tech_analysis[:150] if tech_analysis else "Tín hiệu nến ổn định tại vùng cản.",
+                "technicalConfluence": f"Dự báo Kronos: {kronos_prediction.get('trend')} ({kronos_prediction.get('confidence')}%)",
+                "newsSentiment": sentiment_analysis[:150] if sentiment_analysis else "Tâm lý tin tức ở mức trung tính.",
+                "keyWarning": "Kiểm tra lại vùng giá Entry trước khi bấm duyệt đặt lệnh.",
+            },
+        }
 
 
 async def send_discord_alert(webhook_url: str, message: str):

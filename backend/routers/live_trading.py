@@ -271,3 +271,65 @@ async def live_history(
         if isinstance(t.get("timestamp"), datetime):
             t["timestamp"] = t["timestamp"].isoformat()
     return {"trades": trades, "count": len(trades)}
+
+
+@router.get("/ai-consult")
+async def get_ai_consultation(
+    symbol: str = "BTCUSDT",
+    interval: str = "1m",
+    current_user_email: str = Depends(get_current_user)
+):
+    """
+    Tạo Kế hoạch Cố vấn Trading AI (AI Trading Blueprint)
+    Bao gồm Vùng Entry, Stop Loss (SL), Take Profit 1 & 2 (TP), R:R ratio, và Lý do phân tích.
+    """
+    sym = symbol.upper().strip()
+    if not VALID_SYMBOL_RE.match(sym):
+        raise HTTPException(400, "Invalid symbol format")
+
+    try:
+        from binance_api import get_historical_klines
+        candles = await get_historical_klines(sym, interval, limit=50)
+        
+        if not candles or len(candles) < 5:
+            raise HTTPException(400, f"Insufficient candle data for {sym}")
+        
+        current_price = float(candles[-1][4])
+
+        from agents import TechnicalAgent, SentimentAgent, TraderAgent
+
+        # 1. Kronos Prediction (or default mock trend)
+        try:
+            from kronos_onnx import ModelEnsemble
+            kronos = ModelEnsemble()
+            kronos_pred = kronos.predict(candles, model_type="lstm")
+        except Exception:
+            kronos_pred = {"trend": "UP", "confidence": 80}
+
+        # 2. Technical Agent Analysis
+        tech_agent = TechnicalAgent()
+        tech_analysis = await tech_agent.analyze(kronos_pred, candles, interval)
+
+        # 3. Sentiment Agent Analysis
+        sent_agent = SentimentAgent()
+        sentiment_analysis = await sent_agent.analyze(sym)
+
+        # 4. Trader Agent Consultation Blueprint
+        trader_agent = TraderAgent()
+        consultation_plan = await trader_agent.consult(
+            symbol=sym,
+            interval=interval,
+            current_price=current_price,
+            candles=candles,
+            kronos_prediction=kronos_pred,
+            tech_analysis=tech_analysis,
+            sentiment_analysis=sentiment_analysis,
+        )
+
+        return consultation_plan
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"[AI CONSULT] Error generating plan for {sym}: {e}")
+        raise HTTPException(500, f"AI Consultation failed: {str(e)}")
+

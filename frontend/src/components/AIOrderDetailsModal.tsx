@@ -1,9 +1,10 @@
 'use client';
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AIConsultPlan } from '@/store/useStore';
+import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, CandlestickSeries } from 'lightweight-charts';
 import {
   X, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, TrendingDown,
-  Clock, ArrowRight, LineChart, Sparkles, Activity
+  Clock, ArrowRight, LineChart, Sparkles, Activity, Target, RefreshCw, ZoomIn
 } from 'lucide-react';
 
 interface AIOrderDetailsModalProps {
@@ -12,102 +13,197 @@ interface AIOrderDetailsModalProps {
   onClose: () => void;
 }
 
-// Static SVG Candlestick Setup Chart at the moment position was issued
-function StaticSetupChart({ plan }: { plan: AIConsultPlan }) {
+// Official TradingView Lightweight Charts Interactive Snapshot Component (100 candles, 15m, Zoomable)
+function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
+  const chartContainerRef = useRef<HTMLDivElement>(null);
+  const chartRef = useRef<IChartApi | null>(null);
+  const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const priceLinesRef = useRef<any[]>([]);
+
+  const [isLoading, setIsLoading] = useState(true);
+
   const isLong = plan.recommendation === 'LONG';
   const entry = plan.entryZone.idealEntry;
   const sl = plan.stopLoss.price;
-  const tp1 = plan.takeProfit[0]?.price || entry * (isLong ? 1.015 : 0.985);
-  const tp2 = plan.takeProfit[1]?.price || entry * (isLong ? 1.03 : 0.97);
+  const tp1 = plan.takeProfit[0]?.price || (isLong ? entry * 1.015 : entry * 0.985);
+  const tp2 = plan.takeProfit[1]?.price || (isLong ? entry * 1.03 : entry * 0.97);
 
-  // Generate simulated candle data snapshot leading up to the idealEntry
-  const base = entry;
-  const candleCount = 24;
-  const candleWidth = 14;
-  const gap = 6;
-  const width = candleCount * (candleWidth + gap) + 40;
-  const height = 180;
+  useEffect(() => {
+    if (!chartContainerRef.current) return;
 
-  // Calculate price boundaries for chart scaling
-  const allPrices = [entry, sl, tp1, tp2, base * 0.99, base * 1.01];
-  const minP = Math.min(...allPrices);
-  const maxP = Math.max(...allPrices);
-  const rangeP = maxP - minP || 1;
+    // 1. Initialize Lightweight Chart instance with interactive Scroll & Scale enabled
+    const chart = createChart(chartContainerRef.current, {
+      layout: {
+        background: { type: ColorType.Solid, color: '#090d14' },
+        textColor: '#94a3b8',
+        fontSize: 11,
+      },
+      grid: {
+        vertLines: { color: '#1e293b' },
+        horzLines: { color: '#1e293b' },
+      },
+      crosshair: {
+        mode: 1, // Magnet crosshair
+      },
+      rightPriceScale: {
+        borderColor: '#1e293b',
+        scaleMargins: {
+          top: 0.15,
+          bottom: 0.15,
+        },
+      },
+      timeScale: {
+        borderColor: '#1e293b',
+        timeVisible: true,
+        secondsVisible: false,
+      },
+      handleScroll: {
+        mouseWheel: true,
+        pressedMouseMove: true,
+        horzTouchDrag: true,
+        vertTouchDrag: true,
+      },
+      handleScale: {
+        axisPressedMouseMove: true,
+        mouseWheel: true,
+        pinch: true,
+      },
+    });
 
-  const priceToY = (p: number) => {
-    return height - 20 - ((p - minP) / rangeP) * (height - 40);
-  };
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: '#10b981',
+      downColor: '#f43f5e',
+      borderVisible: false,
+      wickUpColor: '#10b981',
+      wickDownColor: '#f43f5e',
+    });
 
-  // Mock historical candles ending right at the Entry moment
-  const candles = Array.from({ length: candleCount }).map((_, idx) => {
-    const isLast = idx === candleCount - 1;
-    const offsetRatio = (idx - candleCount) * 0.001;
-    const cOpen = base * (1 + offsetRatio + (Math.sin(idx) * 0.002));
-    const cClose = isLast ? entry : base * (1 + offsetRatio + (Math.cos(idx) * 0.002));
-    const cHigh = Math.max(cOpen, cClose) * 1.0015;
-    const cLow = Math.min(cOpen, cClose) * 0.9985;
-    return { open: cOpen, close: cClose, high: cHigh, low: cLow, isUp: cClose >= cOpen };
-  });
+    chartRef.current = chart;
+    seriesRef.current = series;
 
-  const entryY = priceToY(entry);
-  const slY = priceToY(sl);
-  const tp1Y = priceToY(tp1);
-  const tp2Y = priceToY(tp2);
+    // 2. Fetch 100 historical 15m candles from Binance API for this symbol
+    const fetchKlines = async () => {
+      setIsLoading(true);
+      try {
+        const sym = plan.symbol.toUpperCase().replace('/', '');
+        // Fixed 15m interval and 100 candles limit as requested by user
+        const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=15m&limit=100`);
+        const data = await res.json();
+        
+        if (Array.isArray(data) && data.length > 0) {
+          const parsed = data.map((d: any) => ({
+            time: (d[0] / 1000) as UTCTimestamp,
+            open: parseFloat(d[1]),
+            high: parseFloat(d[2]),
+            low: parseFloat(d[3]),
+            close: parseFloat(d[4]),
+          }));
+
+          series.setData(parsed);
+
+          // Clear old lines
+          priceLinesRef.current.forEach(l => series.removePriceLine(l));
+          priceLinesRef.current = [];
+
+          // Overlay Price Lines
+          const lineEntry = series.createPriceLine({
+            price: entry,
+            color: '#3b82f6',
+            lineWidth: 2,
+            lineStyle: 0, // Solid
+            axisLabelVisible: true,
+            title: `ENTRY: $${entry.toLocaleString()}`,
+          });
+
+          const lineSL = series.createPriceLine({
+            price: sl,
+            color: '#f43f5e',
+            lineWidth: 2,
+            lineStyle: 0, // Solid
+            axisLabelVisible: true,
+            title: `SL (-${plan.stopLoss.percentage}%): $${sl.toLocaleString()}`,
+          });
+
+          const lineTP1 = series.createPriceLine({
+            price: tp1,
+            color: '#10b981',
+            lineWidth: 2,
+            lineStyle: 2, // Dashed
+            axisLabelVisible: true,
+            title: `TP1: $${tp1.toLocaleString()}`,
+          });
+
+          const lineTP2 = series.createPriceLine({
+            price: tp2,
+            color: '#14b8a6',
+            lineWidth: 2,
+            lineStyle: 2, // Dashed
+            axisLabelVisible: true,
+            title: `TP2: $${tp2.toLocaleString()}`,
+          });
+
+          priceLinesRef.current = [lineEntry, lineSL, lineTP1, lineTP2];
+          chart.timeScale().fitContent();
+        }
+      } catch (err) {
+        console.warn('Failed to load Binance 15m klines for static chart:', err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchKlines();
+
+    const handleResize = () => {
+      if (chartContainerRef.current && chartRef.current) {
+        chartRef.current.applyOptions({
+          width: chartContainerRef.current.clientWidth,
+          height: chartContainerRef.current.clientHeight,
+        });
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+    };
+  }, [plan]);
 
   return (
-    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-3">
+    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-3 font-sans">
       <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
         <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
-          <LineChart size={14} /> Biểu đồ Tĩnh Setup vào lúc AI ra Vị thế
+          <LineChart size={15} /> 100 nến thực tế khung 15M ({plan.symbol}) tại thời điểm xuất lệnh
         </span>
-        <span className="text-[11px] text-zinc-500">
-          Thời điểm: {new Date(plan.timestamp || Date.now()).toLocaleTimeString()}
+        <span className="text-[11px] text-zinc-400 bg-zinc-900 px-2.5 py-0.5 rounded-lg border border-zinc-800 font-mono flex items-center gap-1">
+          <ZoomIn size={12} className="text-emerald-400" /> Co giãn / Lăn chuột thu phóng
         </span>
       </div>
 
-      <div className="relative w-full overflow-hidden bg-zinc-900/80 rounded-xl p-2 border border-zinc-800">
-        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-44" preserveAspectRatio="none">
-          {/* Grid lines */}
-          <line x1="0" y1={entryY} x2={width} y2={entryY} stroke="#3b82f6" strokeWidth="1.5" strokeDasharray="3 3" />
-          <line x1="0" y1={slY} x2={width} y2={slY} stroke="#f43f5e" strokeWidth="1.5" />
-          <line x1="0" y1={tp1Y} x2={width} y2={tp1Y} stroke="#10b981" strokeWidth="1.5" strokeDasharray="4 2" />
-          <line x1="0" y1={tp2Y} x2={width} y2={tp2Y} stroke="#14b8a6" strokeWidth="1.5" strokeDasharray="4 2" />
+      {/* Lightweight TradingView Chart Container with Mouse Zoom/Pan enabled */}
+      <div className="relative w-full h-72 overflow-hidden bg-[#090d14] rounded-xl border border-zinc-800 shadow-inner">
+        {isLoading && (
+          <div className="absolute inset-0 z-10 bg-zinc-950/80 backdrop-blur-xs flex items-center justify-center gap-2 text-xs font-mono text-emerald-400">
+            <RefreshCw size={16} className="animate-spin" />
+            <span>Đang nạp 100 nến khung 15m...</span>
+          </div>
+        )}
+        <div ref={chartContainerRef} className="w-full h-full cursor-crosshair" />
+      </div>
 
-          {/* Candlesticks */}
-          {candles.map((c, i) => {
-            const x = i * (candleWidth + gap) + 15;
-            const openY = priceToY(c.open);
-            const closeY = priceToY(c.close);
-            const highY = priceToY(c.high);
-            const lowY = priceToY(c.low);
-            const bodyY = Math.min(openY, closeY);
-            const bodyH = Math.max(Math.abs(openY - closeY), 2);
-            const color = c.isUp ? '#10b981' : '#f43f5e';
-
-            return (
-              <g key={i}>
-                <line x1={x + candleWidth / 2} y1={highY} x2={x + candleWidth / 2} y2={lowY} stroke={color} strokeWidth="1" />
-                <rect x={x} y={bodyY} width={candleWidth} height={bodyH} fill={color} rx="1" />
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* Labels Overlay */}
-        <div className="absolute right-3 top-2 flex flex-col gap-1 text-[10px] font-mono font-bold">
-          <span className="text-teal-400 bg-teal-950/80 px-2 py-0.5 rounded border border-teal-500/30">
-            TP2: ${tp2.toLocaleString()}
-          </span>
-          <span className="text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
-            TP1: ${tp1.toLocaleString()}
-          </span>
-          <span className="text-blue-400 bg-blue-950/80 px-2 py-0.5 rounded border border-blue-500/30">
-            AI Entry: ${entry.toLocaleString()}
-          </span>
-          <span className="text-rose-400 bg-rose-950/80 px-2 py-0.5 rounded border border-rose-500/30">
-            SL (-{plan.stopLoss.percentage}%): ${sl.toLocaleString()}
-          </span>
+      {/* Chart Legend */}
+      <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-zinc-400 pt-1">
+        <div className="flex items-center gap-3">
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-blue-500 rounded inline-block" /> Entry AI</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-emerald-500 rounded inline-block" /> Mốc TP1 / TP2</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-rose-500 rounded inline-block" /> Mốc Stop Loss</span>
         </div>
+        <span className="text-zinc-400 font-bold">Khung: 15M • 100 Nến • Chế độ: {plan.mode || 'SCALP'}</span>
       </div>
     </div>
   );
@@ -120,8 +216,8 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
   const isWait = plan.recommendation === 'WAIT';
 
   return (
-    <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans text-zinc-100">
-      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[90vh] flex flex-col">
+    <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans text-zinc-100 select-none">
+      <div className="bg-zinc-900 border border-zinc-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
         
         {/* Header */}
         <div className="p-4 md:p-5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/60">
@@ -136,7 +232,7 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
             </div>
 
             <div className="text-xs font-mono text-zinc-400">
-              Timeframe: <strong className="text-zinc-200">{plan.interval}</strong> • Độ tin cậy: <strong className="text-emerald-400">{plan.confidence}%</strong>
+              Khung nến: <strong className="text-zinc-200 uppercase">15M</strong> • Độ tin cậy: <strong className="text-emerald-400">{plan.confidence}%</strong>
             </div>
           </div>
 
@@ -188,7 +284,7 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
               {plan.analysisSummary.candlestickPattern && (
                 <div className="flex items-start gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                  <p><strong className="text-zinc-200">Mẫu hình nến:</strong> {plan.analysisSummary.candlestickPattern}</p>
+                  <p><strong className="text-zinc-200">Hợp lưu Đa Khung (15m):</strong> {plan.analysisSummary.candlestickPattern}</p>
                 </div>
               )}
 
@@ -215,8 +311,8 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
             </div>
           </div>
 
-          {/* Static Chart Snapshot at Position Creation */}
-          <StaticSetupChart plan={plan} />
+          {/* Interactive TradingView Setup Chart (100 candles, 15m, Zoom/Scale) */}
+          <RealLightweightSetupChart plan={plan} />
         </div>
       </div>
     </div>

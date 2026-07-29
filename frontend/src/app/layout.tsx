@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LDM AI Trading Web",
-  description: "Advanced Algorithmic Trading Terminal with AI Inference",
+  title: "LDM AI Trading Copilot",
+  description: "Nền tảng Cố vấn & Phân tích Giao dịch Vị thế AI",
 };
 
 export default function RootLayout({
@@ -26,8 +26,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }

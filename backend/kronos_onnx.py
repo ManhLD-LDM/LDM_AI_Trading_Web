@@ -2,8 +2,13 @@ import numpy as np
 import os
 import asyncio
 import pandas as pd
-import pandas_ta as ta
 from logger import model_logger
+
+try:
+    import ta as ta_lib
+    _TA_AVAILABLE = True
+except ImportError:
+    _TA_AVAILABLE = False
 
 try:
     import onnxruntime as ort
@@ -30,36 +35,54 @@ SEQ_LEN = 60
 
 
 def _compute_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Compute 9 technical indicators + close from an OHLCV DataFrame."""
+    """Compute 9 technical indicators + close from an OHLCV DataFrame using the 'ta' library."""
     df = df.copy()
-    df.ta.ema(length=20, append=True)
-    df.ta.ema(length=50, append=True)
-    df.ta.rsi(length=14, append=True)
-    df.ta.macd(fast=12, slow=26, signal=9, append=True)
-    df.ta.bbands(length=20, std=2, append=True)
-    df.ta.atr(length=14, append=True)
 
-    cols = [
-        'close',
-        'EMA_20', 'EMA_50',
-        'RSI_14',
-        'MACD_12_26_9', 'MACDs_12_26_9',
-        'BBU_20_2.0', 'BBL_20_2.0',
-        'ATRr_14',
-    ]
-    # Use available columns (names may differ between pandas_ta versions)
-    available = []
-    for c in cols:
-        matching = [col for col in df.columns if c in col]
-        if matching:
-            available.append(matching[0])
-        elif c == 'close':
-            available.append('close')
+    if _TA_AVAILABLE:
+        # EMA 20 & 50
+        df['EMA_20'] = ta_lib.trend.ema_indicator(df['close'], window=20)
+        df['EMA_50'] = ta_lib.trend.ema_indicator(df['close'], window=50)
+        # RSI 14
+        df['RSI_14'] = ta_lib.momentum.rsi(df['close'], window=14)
+        # MACD
+        macd = ta_lib.trend.MACD(df['close'], window_slow=26, window_fast=12, window_sign=9)
+        df['MACD_line'] = macd.macd()
+        df['MACD_signal'] = macd.macd_signal()
+        # Bollinger Bands
+        bb = ta_lib.volatility.BollingerBands(df['close'], window=20, window_dev=2)
+        df['BB_upper'] = bb.bollinger_hband()
+        df['BB_lower'] = bb.bollinger_lband()
+        # ATR 14
+        df['ATR_14'] = ta_lib.volatility.average_true_range(df['high'], df['low'], df['close'], window=14)
+    else:
+        # Fallback: simple manual EMA/SMA when ta not available
+        df['EMA_20'] = df['close'].ewm(span=20, adjust=False).mean()
+        df['EMA_50'] = df['close'].ewm(span=50, adjust=False).mean()
+        delta = df['close'].diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain / (loss + 1e-8)
+        df['RSI_14'] = 100 - (100 / (1 + rs))
+        ema12 = df['close'].ewm(span=12, adjust=False).mean()
+        ema26 = df['close'].ewm(span=26, adjust=False).mean()
+        df['MACD_line'] = ema12 - ema26
+        df['MACD_signal'] = df['MACD_line'].ewm(span=9, adjust=False).mean()
+        sma20 = df['close'].rolling(20).mean()
+        std20 = df['close'].rolling(20).std()
+        df['BB_upper'] = sma20 + 2 * std20
+        df['BB_lower'] = sma20 - 2 * std20
+        tr = pd.concat([
+            df['high'] - df['low'],
+            (df['high'] - df['close'].shift()).abs(),
+            (df['low'] - df['close'].shift()).abs()
+        ], axis=1).max(axis=1)
+        df['ATR_14'] = tr.rolling(14).mean()
 
-    result = df[available].copy()
+    result = df[['close', 'EMA_20', 'EMA_50', 'RSI_14', 'MACD_line', 'MACD_signal', 'BB_upper', 'BB_lower', 'ATR_14']].copy()
     result.bfill(inplace=True)
     result.fillna(0, inplace=True)
     return result
+
 
 
 def _df_from_klines(klines: list) -> pd.DataFrame:

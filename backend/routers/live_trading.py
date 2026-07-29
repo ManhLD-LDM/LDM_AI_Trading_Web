@@ -277,19 +277,26 @@ async def live_history(
 async def get_ai_consultation(
     symbol: str = "BTCUSDT",
     interval: str = "1m",
+    mode: str = "scalp",
     current_user_email: str = Depends(get_current_user)
 ):
     """
-    Tạo Kế hoạch Cố vấn Trading AI (AI Trading Blueprint)
-    Bao gồm Vùng Entry, Stop Loss (SL), Take Profit 1 & 2 (TP), R:R ratio, và Lý do phân tích.
+    Tạo Kế hoạch Cố vấn Trading AI Đa Khung Thời Gian (Multi-Timeframe AI Trading Blueprint)
+    Phân tích hợp lưu từ khung 15m, 1h, 4h, 1D, 1W cho khung thời gian người dùng đang xem.
+    Chế độ: scalp (lướt sóng ngắn) hoặc swing (đánh xu hướng dài).
     """
     sym = symbol.upper().strip()
     if not VALID_SYMBOL_RE.match(sym):
         raise HTTPException(400, "Invalid symbol format")
 
     try:
-        from binance_api import get_historical_klines
-        candles = await get_historical_klines(sym, interval, limit=100)
+        from binance_api import get_mtf_klines, get_historical_klines
+        mtf_klines = await get_mtf_klines(sym, ['15m', '1h', '4h', '1d', '1w'], limit=100)
+        
+        # Primary candles for current view
+        candles = mtf_klines.get(interval)
+        if not candles:
+            candles = await get_historical_klines(sym, interval, limit=100)
         if hasattr(candles, 'tolist'):
             candles = candles.tolist()
         
@@ -308,19 +315,20 @@ async def get_ai_consultation(
         except Exception:
             kronos_pred = {"trend": "UP", "confidence": 80}
 
-        # 2. Technical Agent Analysis
+        # 2. Multi-Timeframe Technical Agent Analysis (15m, 1h, 4h, 1D, 1W)
         tech_agent = TechnicalAgent()
-        tech_analysis = await tech_agent.analyze(kronos_pred, candles, interval)
+        tech_analysis = await tech_agent.analyze_mtf(kronos_pred, mtf_klines, interval)
 
         # 3. Sentiment Agent Analysis
         sent_agent = SentimentAgent()
         sentiment_analysis = await sent_agent.analyze(sym)
 
-        # 4. Trader Agent Consultation Blueprint
+        # 4. Trader Agent Consultation Blueprint (with Scalp/Swing Mode)
         trader_agent = TraderAgent()
         consultation_plan = await trader_agent.consult(
             symbol=sym,
             interval=interval,
+            mode=mode,
             current_price=current_price,
             candles=candles,
             kronos_prediction=kronos_pred,

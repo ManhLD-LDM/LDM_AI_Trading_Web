@@ -219,11 +219,14 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
         if (planTime > 0 && Date.now() < planTime - 15 * 60 * 1000) return plan;
 
         if (currentStatus === 'PENDING') {
-          const entryMin = Math.min(minEntry, maxEntry) * 0.998;
-          const entryMax = Math.max(minEntry, maxEntry) * 1.002;
-          
-          const isActivatedLong = isLong && (price >= entryMin || price >= idealEntry * 0.998);
-          const isActivatedShort = !isLong && (price <= entryMax || price <= idealEntry * 1.002);
+          const entryMin = Math.min(minEntry, maxEntry);
+          const entryMax = Math.max(minEntry, maxEntry);
+
+          // Correct Limit Order Entry Activation:
+          // LONG: Order triggers when price DROPS DOWN to or below entryMax
+          // SHORT: Order triggers when price RALLIES UP to or above entryMin
+          const isActivatedLong = isLong && price <= entryMax * 1.001;
+          const isActivatedShort = !isLong && price >= entryMin * 0.999;
 
           if (isActivatedLong || isActivatedShort) {
             nextStatus = 'ACTIVE';

@@ -437,11 +437,13 @@ async def evaluate_plan_historical_klines(doc: dict) -> dict:
 
             if next_status == "PENDING":
                 if is_long:
-                    if high >= entry_min:
+                    # LONG: Order activates when candle LOW drops down to or below entry_max
+                    if low <= entry_max * 1.001:
                         next_status = "ACTIVE"
                         activated_at = activated_at or int(k[0])
                 else:
-                    if low <= entry_max:
+                    # SHORT: Order activates when candle HIGH rallies up to or above entry_min
+                    if high >= entry_min * 0.999:
                         next_status = "ACTIVE"
                         activated_at = activated_at or int(k[0])
 

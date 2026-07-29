@@ -1,6 +1,14 @@
 import pandas as pd
 import numpy as np
-import pandas_ta as ta
+
+def _compute_atr(df: pd.DataFrame, length: int = 14) -> pd.Series:
+    """Compute ATR manually without pandas_ta dependency."""
+    tr = pd.concat([
+        df['high'] - df['low'],
+        (df['high'] - df['close'].shift()).abs(),
+        (df['low'] - df['close'].shift()).abs()
+    ], axis=1).max(axis=1)
+    return tr.rolling(length).mean()
 
 class BacktestEngine:
     def __init__(self, initial_balance=10000.0, maker_fee=0.001, taker_fee=0.001):
@@ -39,13 +47,8 @@ class BacktestEngine:
     def _simulate(self, df: pd.DataFrame, risk_per_trade=0.02, slippage=0.0005, atr_sl_multiplier=2.0, atr_tp_multiplier=4.0):
         # Ensure ATR is calculated for dynamic Stop-Loss
         if 'atr' not in df.columns:
-            df.ta.atr(length=14, append=True)
-            # pandas_ta column naming may vary
-            atr_col = next((c for c in df.columns if c.startswith('ATRr')), None)
-            if atr_col:
-                df['atr'] = df[atr_col].bfill()
-            else:
-                df['atr'] = df['close'] * 0.02
+            df['atr'] = _compute_atr(df, length=14).bfill().fillna(df['close'] * 0.02)
+
 
         balance = self.initial_balance
         position = 0

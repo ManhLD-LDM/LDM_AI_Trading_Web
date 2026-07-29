@@ -1,19 +1,8 @@
 'use client';
-import { useEffect, useState, useRef } from 'react';
-import { useTradingStore } from '@/store/useStore';
-import { UTCTimestamp } from 'lightweight-charts';
-import { getWsUrl } from '@/lib/api';
-import { X, Sparkles, Activity } from 'lucide-react';
-
-type AIEvent = {
-  type: string;
-  agent_name: string;
-  thought: string;
-  timestamp?: string;
-  action?: string;
-  price?: number;
-  ts?: number;
-};
+import { useState } from 'react';
+import { useTradingStore, AIConsultPlan } from '@/store/useStore';
+import { X, Sparkles, Activity, History, TrendingUp, TrendingDown, Eye, ChevronRight } from 'lucide-react';
+import AIOrderDetailsModal from './AIOrderDetailsModal';
 
 interface SidebarProps {
   isOpen?: boolean;
@@ -21,92 +10,19 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
-  const [events, setEvents] = useState<AIEvent[]>([]);
-  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
-  const scrollRef = useRef<HTMLDivElement>(null);
-  
-  const { pair, interval, addSignal, token } = useTradingStore();
+  const { pair, interval, aiConsultHistory, aiConsultPlan } = useTradingStore();
+  const [selectedPlan, setSelectedPlan] = useState<AIConsultPlan | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
-  useEffect(() => {
-    if (!token) return;
-
-    let ws: WebSocket | null = null;
-    let reconnectTimer: ReturnType<typeof setTimeout>;
-    let pingTimer: ReturnType<typeof setInterval>;
-    let isDestroyed = false;
-
-    const connect = () => {
-      if (isDestroyed) return;
-      const wsUrl = getWsUrl();
-      ws = new WebSocket(wsUrl);
-      setConnectionStatus('connecting');
-
-      ws.onopen = () => {
-        ws!.send(JSON.stringify({ type: 'auth', token }));
-        setConnectionStatus('connected');
-        pingTimer = setInterval(() => {
-          if (ws?.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'ping' }));
-          }
-        }, 30000);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === 'pong') return;
-          if (data.type === 'ai_log') {
-            const timestamp = new Date().toLocaleTimeString();
-            setEvents(prev => [...prev.slice(-200), { ...data, timestamp }]);
-            
-            if (data.agent_name === 'Trader Agent' && data.action && data.action !== 'HOLD') {
-              addSignal({
-                time: (data.timestamp || (new Date().getTime() / 1000)) as UTCTimestamp,
-                position: data.action === 'BUY' ? 'belowBar' : 'aboveBar',
-                color: data.action === 'BUY' ? '#10b981' : '#f43f5e',
-                shape: data.action === 'BUY' ? 'arrowUp' : 'arrowDown',
-                text: `${data.action} @ ${data.price || ''}`,
-              });
-            }
-          }
-        } catch (e) {
-          console.error("Failed to parse ws message", e);
-        }
-      };
-
-      ws.onclose = () => {
-        clearInterval(pingTimer);
-        setConnectionStatus('disconnected');
-        if (!isDestroyed) {
-          reconnectTimer = setTimeout(connect, 3000);
-        }
-      };
-      ws.onerror = () => ws?.close();
-    };
-
-    connect();
-
-    return () => {
-      isDestroyed = true;
-      clearTimeout(reconnectTimer);
-      clearInterval(pingTimer);
-      ws?.close();
-    };
-  }, [token, addSignal]);
-
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [events]);
-
-  const getAgentColor = (name: string) => {
-    if (name.includes('Kronos')) return { text: 'text-amber-400', bg: 'bg-amber-400/10', border: 'border-amber-400/30' };
-    if (name.includes('Tech')) return { text: 'text-blue-400', bg: 'bg-blue-400/10', border: 'border-blue-400/30' };
-    if (name.includes('Sentiment')) return { text: 'text-purple-400', bg: 'bg-purple-400/10', border: 'border-purple-400/30' };
-    if (name.includes('Trader')) return { text: 'text-emerald-400', bg: 'bg-emerald-400/10', border: 'border-emerald-400/30' };
-    return { text: 'text-zinc-400', bg: 'bg-zinc-400/10', border: 'border-zinc-400/30' };
+  const handleOpenDetails = (plan: AIConsultPlan) => {
+    setSelectedPlan(plan);
+    setIsModalOpen(true);
   };
+
+  // Combine current active plan and historical plans
+  const allPlans = aiConsultHistory.length > 0
+    ? aiConsultHistory
+    : (aiConsultPlan ? [aiConsultPlan] : []);
 
   return (
     <>
@@ -121,82 +37,97 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
       <div className={`
         ${isOpen ? 'translate-x-0' : 'translate-x-full md:translate-x-0'}
         fixed md:static inset-y-0 right-0
-        w-80 h-full flex flex-col bg-zinc-900/90 border-l border-zinc-800 p-5 shrink-0 z-50 md:z-20 font-sans text-zinc-100
+        w-80 h-full flex flex-col bg-zinc-900/90 border-l border-zinc-800 p-5 shrink-0 z-50 md:z-20 font-sans text-zinc-100 select-none
         transition-transform duration-300 ease-in-out
       `}>
-        <div className="flex items-center justify-between mb-6 pb-4 border-b border-zinc-800">
+        <div className="flex items-center justify-between mb-5 pb-4 border-b border-zinc-800">
           <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-400 flex items-center gap-2">
-            <Sparkles size={14} />
-            <span>AI Realtime Log</span>
-            <span className="flex h-2 w-2 relative ml-1">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            <History size={15} />
+            <span>Lịch sử Lệnh AI Cố vấn</span>
+            <span className="text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+              {allPlans.length}
             </span>
           </h2>
-          {/* Close button for mobile */}
           <button 
             onClick={onClose}
-            className="md:hidden p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:scale-95 transition-all"
+            className="md:hidden p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:scale-95 transition-all"
           >
             <X size={18} />
           </button>
         </div>
       
-      <div ref={scrollRef} className="flex-1 overflow-y-auto pr-1 custom-scrollbar relative pl-1 space-y-4">
-        {events.length === 0 ? (
-          <div className="text-xs text-zinc-500 italic text-center py-10">
-            Đang chờ phân tích AI...
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {events.map((ev, i) => {
-              const colors = getAgentColor(ev.agent_name);
+        {/* History List */}
+        <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar space-y-3">
+          {allPlans.length === 0 ? (
+            <div className="text-xs text-zinc-500 italic text-center py-10 space-y-2">
+              <Sparkles size={24} className="mx-auto text-zinc-600 animate-pulse" />
+              <p>Chưa có lịch sử lệnh AI.</p>
+              <p className="text-[11px] text-zinc-600">Bấm "Yêu cầu AI Cố vấn" để tạo lệnh đầu tiên.</p>
+            </div>
+          ) : (
+            allPlans.map((plan, idx) => {
+              const isLong = plan.recommendation === 'LONG';
+              const isWait = plan.recommendation === 'WAIT';
               return (
-                <div key={i} className="bg-zinc-950 p-3 rounded-xl border border-zinc-800/80 space-y-1.5 font-mono text-xs">
+                <div
+                  key={plan.id || idx}
+                  onClick={() => handleOpenDetails(plan)}
+                  className="group bg-zinc-950 p-3.5 rounded-xl border border-zinc-800/90 hover:border-emerald-500/40 transition-all cursor-pointer space-y-2 font-mono text-xs shadow-md active:scale-[0.98]"
+                >
                   <div className="flex items-center justify-between">
-                    <span className={`text-[10px] font-bold uppercase ${colors.text}`}>
-                      {ev.agent_name}
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded font-bold text-[10px] flex items-center gap-1 ${
+                        isLong ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' :
+                        isWait ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30' :
+                        'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                      }`}>
+                        {isLong ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                        {plan.recommendation}
+                      </span>
+                      <span className="font-bold text-zinc-200">{plan.symbol}</span>
+                    </div>
+                    <span className="text-[10px] text-zinc-500 font-mono">
+                      {new Date(plan.timestamp || Date.now()).toLocaleTimeString()}
                     </span>
-                    <span className="text-[10px] text-zinc-500">{ev.timestamp}</span>
                   </div>
-                  <p className="text-xs font-sans text-zinc-300 leading-relaxed font-light">
-                    {ev.thought}
-                  </p>
+
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1">
+                    <span>Entry: <strong className="text-zinc-200">${plan.entryZone.idealEntry.toLocaleString()}</strong></span>
+                    <span className="text-emerald-400 font-bold">{plan.confidence}% Tin cậy</span>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-[10px]">
+                    <span className="text-rose-400">SL: ${plan.stopLoss.price}</span>
+                    <span className="text-emerald-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform font-bold">
+                      <span>Xem Chi Tiết</span>
+                      <ChevronRight size={12} />
+                    </span>
+                  </div>
                 </div>
               );
-            })}
+            })
+          )}
+        </div>
+
+        {/* Footer info */}
+        <div className="mt-4 pt-4 border-t border-zinc-800 font-mono text-xs space-y-2">
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-zinc-500">Cặp hiện tại:</span>
+            <span className="text-zinc-200 font-bold">{pair}</span>
           </div>
-        )}
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-zinc-500">Khung thời gian:</span>
+            <span className="text-zinc-200 font-bold">{interval}</span>
+          </div>
+        </div>
       </div>
 
-      <div className="mt-4 pt-4 border-t border-zinc-800 space-y-2.5 font-mono text-xs">
-        <h3 className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 mb-2 flex items-center gap-1.5">
-          <Activity size={12} /> Trạng thái Hệ thống
-        </h3>
-        <div className="flex justify-between items-center text-xs">
-          <span className="text-zinc-500">Cặp giao dịch:</span>
-          <span className="text-zinc-200 font-bold">{pair}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="text-zinc-500">Khung thời gian:</span>
-          <span className="text-zinc-200 font-bold">{interval}</span>
-        </div>
-        <div className="flex justify-between items-center text-xs">
-          <span className="text-zinc-500">Kết nối Socket:</span>
-          <span className={`font-bold flex items-center gap-1.5 ${
-            connectionStatus === 'connected' ? 'text-emerald-400' :
-            connectionStatus === 'connecting' ? 'text-amber-400' : 'text-rose-400'
-          }`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${
-              connectionStatus === 'connected' ? 'bg-emerald-500' :
-              connectionStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : 'bg-rose-500'
-            }`} />
-            {connectionStatus === 'connected' ? 'Bảo mật' :
-             connectionStatus === 'connecting' ? 'Đang kết nối...' : 'Mất kết nối'}
-          </span>
-        </div>
-      </div>
-    </div>
+      {/* AI Order Details Modal */}
+      <AIOrderDetailsModal
+        plan={selectedPlan}
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+      />
     </>
   );
 }

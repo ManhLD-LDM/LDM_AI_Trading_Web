@@ -11,8 +11,8 @@ export type SignalMarker = {
 };
 
 export type IndicatorConfig = {
-  instanceId: string; // Unique ID for this instance on the chart (e.g. 'sma_1')
-  indicatorId: string; // The ID from INDICATOR_REGISTRY (e.g. 'sma')
+  instanceId: string;
+  indicatorId: string;
   params: Record<string, any>;
   active: boolean;
 };
@@ -64,6 +64,7 @@ interface TradingStore {
   signals: SignalMarker[];
   indicators: IndicatorConfig[];
   aiConsultPlan: AIConsultPlan | null;
+  aiConsultHistory: AIConsultPlan[];
   isAiConsultLoading: boolean;
   setPair: (pair: string) => void;
   setInterval: (interval: string) => void;
@@ -79,7 +80,6 @@ interface TradingStore {
   logout: () => void;
 }
 
-// Keep some default active instances
 const defaultIndicators: IndicatorConfig[] = [
   { instanceId: 'sma_1', indicatorId: 'sma', params: { period: 20, color: '#f59e0b' }, active: false },
   { instanceId: 'ema_1', indicatorId: 'ema', params: { period: 50, color: '#3b82f6' }, active: false },
@@ -109,32 +109,44 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
     signals: [],
     indicators: defaultIndicators,
     aiConsultPlan: null,
+    aiConsultHistory: [],
     isAiConsultLoading: false,
-    setAiConsultPlan: (plan) => set({ aiConsultPlan: plan }),
+    setAiConsultPlan: (plan) => set((state) => {
+      if (!plan) return { aiConsultPlan: null };
+      const planWithMeta: AIConsultPlan = {
+        ...plan,
+        id: plan.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: plan.timestamp || Date.now(),
+      };
+      return {
+        aiConsultPlan: planWithMeta,
+        aiConsultHistory: [planWithMeta, ...state.aiConsultHistory.filter(p => p.id !== planWithMeta.id)].slice(0, 50),
+      };
+    }),
     setIsAiConsultLoading: (loading) => set({ isAiConsultLoading: loading }),
     setPair: (pair) => { set({ pair }); syncPreferences(); },
     setInterval: (interval) => { set({ interval }); syncPreferences(); },
-  addSignal: (signal) => set((state) => ({ signals: [...state.signals, signal] })),
-  clearSignals: () => set({ signals: [] }),
-  toggleIndicator: (instanceId) => set((state) => ({
-    indicators: state.indicators.map(ind => 
-      ind.instanceId === instanceId ? { ...ind, active: !ind.active } : ind
-    )
-  })),
-  addIndicator: (indicatorId, defaultParams) => set((state) => {
-    const newInstanceId = `${indicatorId}_${Date.now()}`;
-    return {
-      indicators: [...state.indicators, {
-        instanceId: newInstanceId,
-        indicatorId,
-        params: defaultParams,
-        active: true
-      }]
-    };
-  }),
-  removeIndicator: (instanceId) => set((state) => ({
-    indicators: state.indicators.filter(ind => ind.instanceId !== instanceId)
-  })),
+    addSignal: (signal) => set((state) => ({ signals: [...state.signals, signal] })),
+    clearSignals: () => set({ signals: [] }),
+    toggleIndicator: (instanceId) => set((state) => ({
+      indicators: state.indicators.map(ind => 
+        ind.instanceId === instanceId ? { ...ind, active: !ind.active } : ind
+      )
+    })),
+    addIndicator: (indicatorId, defaultParams) => set((state) => {
+      const newInstanceId = `${indicatorId}_${Date.now()}`;
+      return {
+        indicators: [...state.indicators, {
+          instanceId: newInstanceId,
+          indicatorId,
+          params: defaultParams,
+          active: true
+        }]
+      };
+    }),
+    removeIndicator: (instanceId) => set((state) => ({
+      indicators: state.indicators.filter(ind => ind.instanceId !== instanceId)
+    })),
     updateIndicatorParams: (instanceId, params) => {
       set((state) => ({
         indicators: state.indicators.map(ind =>
@@ -143,22 +155,19 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
       }));
       syncPreferences();
     },
-  login: (user, token) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('user', JSON.stringify(user));
-      localStorage.setItem('token', token);
-    }
-    
-    // Sync preferences
-    const updates: Partial<TradingStore> = { user, token };
-    if (user.preferences) {
-      if (user.preferences.pair) updates.pair = user.preferences.pair;
-      if (user.preferences.interval) updates.interval = user.preferences.interval;
-      if (user.preferences.indicators) updates.indicators = user.preferences.indicators;
-    }
-    
-    set(updates);
-  },
+    login: (user, token) => {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('user', JSON.stringify(user));
+        localStorage.setItem('token', token);
+      }
+      const updates: Partial<TradingStore> = { user, token };
+      if (user.preferences) {
+        if (user.preferences.pair) updates.pair = user.preferences.pair;
+        if (user.preferences.interval) updates.interval = user.preferences.interval;
+        if (user.preferences.indicators) updates.indicators = user.preferences.indicators;
+      }
+      set(updates);
+    },
     logout: () => {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('user');

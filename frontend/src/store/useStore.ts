@@ -62,6 +62,13 @@ export type AIConsultPlan = {
     newsSentiment?: string;
     keyWarning?: string;
   };
+  pendingAudit?: {
+    tpProbability?: number;
+    slProbability?: number;
+    riskLevel?: string;
+    actionAdvice?: string;
+    auditReasoning?: string;
+  };
   postMortemAnalysis?: {
     outcomeSummary?: string;
     keyFactors?: string;
@@ -147,6 +154,7 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
         activatedAt: plan.activatedAt || existing?.activatedAt,
         completedAt: plan.completedAt || existing?.completedAt,
         currentSlPrice: plan.currentSlPrice || existing?.currentSlPrice,
+        pendingAudit: plan.pendingAudit || existing?.pendingAudit,
         postMortemAnalysis: plan.postMortemAnalysis || existing?.postMortemAnalysis,
       };
       
@@ -176,6 +184,7 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
             activatedAt: p.activatedAt || existing?.activatedAt,
             completedAt: p.completedAt || existing?.completedAt,
             currentSlPrice: p.currentSlPrice || existing?.currentSlPrice,
+            pendingAudit: p.pendingAudit || existing?.pendingAudit,
             postMortemAnalysis: p.postMortemAnalysis || existing?.postMortemAnalysis,
           });
         }
@@ -205,8 +214,10 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
         let completedAt = plan.completedAt;
         let currentSlPrice = plan.currentSlPrice || sl;
 
-        // Robust activation check:
-        // Trigger ACTIVE if price touches entry range OR has already moved into trade direction past ideal entry
+        // RULE: Ignore ticks before position creation timestamp
+        const planTime = plan.timestamp || 0;
+        if (planTime > 0 && Date.now() < planTime - 15 * 60 * 1000) return plan;
+
         if (currentStatus === 'PENDING') {
           const entryMin = Math.min(minEntry, maxEntry) * 0.998;
           const entryMax = Math.max(minEntry, maxEntry) * 1.002;

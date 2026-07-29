@@ -5,7 +5,7 @@ import { getStatusBadge } from './Sidebar';
 import { apiPost } from '@/lib/api';
 import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, CandlestickSeries } from 'lightweight-charts';
 import {
-  X, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, TrendingDown,
+  X, CheckCircle2, AlertTriangle, ShieldCheck, ShieldAlert, TrendingUp, TrendingDown,
   Clock, ArrowRight, LineChart, Sparkles, Activity, Target, RefreshCw, ZoomIn, GraduationCap, RotateCw, AlertOctagon, Trophy
 } from 'lucide-react';
 
@@ -353,6 +353,56 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
               )}
             </div>
           </div>
+
+          {/* Pre-Reanalysis Risk & Feasibility Audit Card (When Pending Plan is Re-analyzed) */}
+          {plan.pendingAudit && (
+            <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-4 rounded-xl border border-amber-500/40 space-y-3 font-sans shadow-lg">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+                  <ShieldAlert size={16} /> Kết quả Đánh giá Rủi ro & Tình trạng Vị thế Chờ
+                </h4>
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                  plan.pendingAudit.riskLevel === 'THẤP' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                  plan.pendingAudit.riskLevel === 'TRUNG BÌNH' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                  'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                }`}>
+                  RỦI RO: {plan.pendingAudit.riskLevel || 'TRUNG BÌNH'}
+                </span>
+              </div>
+
+              {/* Progress bar TP vs SL probability */}
+              <div className="space-y-1 bg-zinc-950 p-3 rounded-lg border border-zinc-800">
+                <div className="flex justify-between text-xs font-mono">
+                  <span className="text-emerald-400 font-bold">Khả năng Hit TP: {plan.pendingAudit.tpProbability || 65}%</span>
+                  <span className="text-rose-400 font-bold">Rủi ro Dính SL: {plan.pendingAudit.slProbability || 35}%</span>
+                </div>
+                <div className="w-full bg-rose-500/30 h-2 rounded-full overflow-hidden flex">
+                  <div
+                    className="bg-emerald-500 h-full transition-all duration-500"
+                    style={{ width: `${plan.pendingAudit.tpProbability || 65}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2 text-xs text-zinc-300">
+                {plan.pendingAudit.actionAdvice && (
+                  <div className="flex items-center gap-2 font-mono">
+                    <span className="text-zinc-400 font-bold">Đề xuất hành động:</span>
+                    <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20">
+                      {plan.pendingAudit.actionAdvice}
+                    </span>
+                  </div>
+                )}
+
+                {plan.pendingAudit.auditReasoning && (
+                  <div className="p-2.5 bg-zinc-900/80 rounded-lg border border-zinc-800 text-zinc-300 leading-relaxed">
+                    <strong className="text-amber-400 font-bold">Phân tích rủi ro: </strong>
+                    {plan.pendingAudit.auditReasoning}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* AI Post-Mortem Strategy Learning Section (After Trade Finishes) */}
           {plan.postMortemAnalysis && (

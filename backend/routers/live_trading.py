@@ -410,7 +410,28 @@ async def evaluate_plan_historical_klines(doc: dict) -> dict:
         completed_at = doc.get("completedAt")
         current_sl = doc.get("currentSlPrice", sl)
 
+        # Get position creation timestamp (or re-analysis timestamp) in milliseconds
+        plan_creation_ms = doc.get("timestamp")
+        if not plan_creation_ms and doc.get("created_at"):
+            ca = doc["created_at"]
+            if isinstance(ca, datetime):
+                plan_creation_ms = int(ca.timestamp() * 1000)
+            elif isinstance(ca, str):
+                try:
+                    plan_creation_ms = int(datetime.fromisoformat(ca.replace("Z", "+00:00")).timestamp() * 1000)
+                except Exception:
+                    plan_creation_ms = 0
+
+        # Allow 15m candle buffer (the 15m candle in which position was created)
+        min_allowed_time = (plan_creation_ms or 0) - (15 * 60 * 1000)
+
         for k in klines:
+            candle_open_time = int(k[0])
+            
+            # RULE: IGNORE ALL CANDLES BEFORE POSITION CREATION TIMESTAMP!
+            if min_allowed_time > 0 and candle_open_time < min_allowed_time:
+                continue
+
             high = float(k[2])
             low = float(k[3])
 
@@ -625,6 +646,17 @@ async def reanalyze_ai_consultation(
         sent_agent = SentimentAgent()
         sentiment_analysis = await sent_agent.analyze(sym)
 
+        # 1. Pre-Reanalysis Audit: Evaluate risk & TP/SL feasibility of existing plan FIRST
+        from agents import PendingAuditAgent, TraderAgent
+        audit_agent = PendingAuditAgent()
+        pending_audit = await audit_agent.audit_pending_plan(
+            existing_plan=doc,
+            current_price=current_price,
+            tech_analysis=tech_analysis,
+            sentiment_analysis=sentiment_analysis
+        )
+
+        # 2. Trader Agent: Recalculate optimal entry, SL, TP parameters
         trader_agent = TraderAgent()
         new_plan = await trader_agent.consult(
             symbol=sym,
@@ -637,14 +669,19 @@ async def reanalyze_ai_consultation(
             sentiment_analysis=sentiment_analysis,
         )
 
+        now_time = datetime.now(timezone.utc)
+        now_ms = int(now_time.timestamp() * 1000)
+
         update_fields = {
+            "timestamp": now_ms,
             "entryZone": new_plan.get("entryZone"),
             "stopLoss": new_plan.get("stopLoss"),
             "takeProfit": new_plan.get("takeProfit"),
             "confidence": new_plan.get("confidence"),
             "riskRewardRatio": new_plan.get("riskRewardRatio"),
             "analysisSummary": new_plan.get("analysisSummary"),
-            "reanalyzedAt": datetime.now(timezone.utc),
+            "pendingAudit": pending_audit,
+            "reanalyzedAt": now_time,
         }
 
         await db["ai_consultations"].update_one(

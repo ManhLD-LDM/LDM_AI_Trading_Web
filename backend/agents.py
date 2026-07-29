@@ -266,6 +266,68 @@ class TraderAgent:
         }
 
 
+class PendingAuditAgent:
+    async def audit_pending_plan(
+        self,
+        existing_plan: dict,
+        current_price: float,
+        tech_analysis: str,
+        sentiment_analysis: str
+    ) -> dict:
+        """
+        Tự động Đánh giá Rủi ro & Khả năng Thắng/Thua của Vị thế Chờ trước khi điều chỉnh lại mốc Entry/SL/TP.
+        """
+        sym = existing_plan.get("symbol", "BTCUSDT")
+        rec = existing_plan.get("recommendation", "LONG")
+        entry = existing_plan.get("entryZone", {}).get("idealEntry", current_price)
+        sl = existing_plan.get("stopLoss", {}).get("price", current_price * 0.99)
+        tp1 = existing_plan.get("takeProfit", [{}])[0].get("price", current_price * 1.02)
+
+        sys_prompt = (
+            "Bạn là Master Risk Auditor & Strategy Analyst. "
+            f"Vị thế đang chờ: {rec} {sym} (Entry ban đầu: ${entry}, SL: ${sl}, TP1: ${tp1}). "
+            f"Giá hiện tại của thị trường: ${current_price}.\n"
+            "Dựa trên nến và tin tức mới nhất, hãy thực hiện ĐÁNH GIÁ RỦI RO & KHẢ NĂNG HIT TP VS SL của vị thế này TRƯỚC KHI ĐIỀU CHỈNH LẠI MỐC ENTRY/SL/TP.\n"
+            "Trả về ĐÚNG MỘT OBJECT JSON duy nhất theo định dạng:\n"
+            "{\n"
+            '  "tpProbability": 70,\n'
+            '  "slProbability": 30,\n'
+            '  "riskLevel": "THẤP" | "TRUNG BÌNH" | "CAO" | "CỰC KỲ NGUY HIỂM",\n'
+            '  "actionAdvice": "GIỮ LỆNH BAN ĐẦU" | "ĐIỀU CHỈNH ENTRY/SL" | "NÊN HỦY LỆNH",\n'
+            '  "auditReasoning": "Giải thích chi tiết tại sao vị thế hiện tại có rủi ro này và khả thi hit TP hay SL bằng Tiếng Việt"\n'
+            "}"
+        )
+
+        user_prompt = (
+            f"Phân tích Đa khung kỹ thuật mới nhất:\n{tech_analysis}\n\n"
+            f"Phân tích tin tức mới nhất:\n{sentiment_analysis}"
+        )
+
+        response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="text/plain")
+
+        try:
+            clean_text = response_text.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            if clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+
+            return json.loads(clean_text.strip())
+        except Exception as e:
+            agent_logger.warning(f"PendingAuditAgent parse error: {e}")
+            dist_to_entry = abs(current_price - entry) / current_price * 100
+            high_risk = dist_to_entry > 3.0
+            return {
+                "tpProbability": 65 if not high_risk else 40,
+                "slProbability": 35 if not high_risk else 60,
+                "riskLevel": "TRUNG BÌNH" if not high_risk else "CAO",
+                "actionAdvice": "ĐIỀU CHỈNH ENTRY/SL" if not high_risk else "NÊN HỦY LỆNH",
+                "auditReasoning": f"Giá hiện tại ${current_price} đã di chuyển {dist_to_entry:.1f}% so với Entry ban đầu. AI đánh giá cần điều chỉnh mốc Entry/SL cho phù hợp với xu hướng mới."
+            }
+
+
 class StrategyLearnerAgent:
     async def analyze_outcome(self, plan: dict, final_status: str) -> dict:
         """Tự động phân tích lý do Thắng/Thua và rút ra bài học chiến lược tự học cho AI."""

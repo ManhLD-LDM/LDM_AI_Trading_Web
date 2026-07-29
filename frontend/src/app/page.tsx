@@ -5,22 +5,16 @@ import Sidebar from '@/components/Sidebar';
 import Toolbar from '@/components/Toolbar';
 import Navbar from '@/components/Navbar';
 import AIConsultantCard from '@/components/AIConsultantCard';
-import PaperTradingDashboard from '@/components/PaperTradingDashboard';
-import BacktestPanel from '@/components/BacktestPanel';
-import LiveTradingDashboard from '@/components/LiveTradingDashboard';
-import { LineChart, History, Settings, User, LogOut, FlaskConical, Zap, Bot } from 'lucide-react';
+import { Settings, User, LogOut, Bot } from 'lucide-react';
 import AuthModal from '@/components/AuthModal';
 import { useTradingStore } from '@/store/useStore';
 import { TradingAPI } from '@/lib/api';
 
-type Tab = 'live' | 'paper' | 'live-trade' | 'backtest' | 'settings';
+type Tab = 'live' | 'settings';
 
 const NAV_ITEMS: Array<{ id: Tab; icon: React.ReactNode; label: string; requiresAuth: boolean }> = [
   { id: 'live', icon: <Bot size={20} strokeWidth={1.75} />, label: 'AI Copilot', requiresAuth: false },
-  { id: 'paper', icon: <FlaskConical size={20} strokeWidth={1.75} />, label: 'Paper Sim', requiresAuth: true },
-  { id: 'live-trade', icon: <Zap size={20} strokeWidth={1.75} />, label: 'Live Exec', requiresAuth: true },
-  { id: 'backtest', icon: <History size={20} strokeWidth={1.75} />, label: 'Backtest', requiresAuth: true },
-  { id: 'settings', icon: <Settings size={20} strokeWidth={1.75} />, label: 'Settings', requiresAuth: true },
+  { id: 'settings', icon: <Settings size={20} strokeWidth={1.75} />, label: 'Cấu hình', requiresAuth: true },
 ];
 
 export default function Home() {
@@ -35,10 +29,6 @@ export default function Home() {
     discordWebhook: '',
     telegramBotToken: '',
     telegramChatId: '',
-    maxPositionSize: 10,
-    stopLoss: 2,
-    maxDrawdown: 20,
-    dailyLossLimit: 5,
   });
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState('');
@@ -55,7 +45,7 @@ export default function Home() {
     setIsSavingSettings(true);
     setSettingsMsg('');
     try {
-      await TradingAPI.me(token); // ensure token valid
+      await TradingAPI.me(token);
       const { apiPut } = await import('@/lib/api');
       await apiPut('/api/user/preferences', { settings }, token);
       setSettingsMsg('Đã lưu cấu hình hệ thống ✓');
@@ -80,7 +70,7 @@ export default function Home() {
       {/* ── Left Sidebar Nav ─────────────────────────────────────────────────── */}
       <div className="fixed md:static bottom-0 left-0 w-full md:w-16 h-16 md:h-full bg-zinc-900/90 border-t md:border-r md:border-t-0 border-zinc-800 flex flex-row md:flex-col items-center justify-around md:justify-start md:py-4 z-40 shrink-0">
         {/* Logo Icon */}
-        <div className="hidden md:flex w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 items-center justify-center font-bold text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.2)] mb-4 shrink-0">
+        <div className="hidden md:flex w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 items-center justify-center font-bold text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.2)] mb-4 shrink-0 font-mono">
           LD
         </div>
 
@@ -138,7 +128,7 @@ export default function Home() {
 
         {/* Workspace Body */}
         <div className="flex-1 flex min-w-0 h-full relative overflow-hidden">
-          {/* Tab 1: AI Copilot Dashboard */}
+          {/* Tab 1: AI Copilot Advisory Workspace */}
           {activeTab === 'live' && (
             <>
               <div className="flex-1 flex flex-col min-w-0 h-full p-3 md:p-4 gap-3 md:gap-4 overflow-y-auto custom-scrollbar">
@@ -159,22 +149,13 @@ export default function Home() {
             </>
           )}
 
-          {/* Tab 2: Paper Trading Simulator */}
-          {activeTab === 'paper' && <PaperTradingDashboard />}
-
-          {/* Tab 3: Binance Live Trading Executions */}
-          {activeTab === 'live-trade' && <LiveTradingDashboard />}
-
-          {/* Tab 4: Strategy Backtesting */}
-          {activeTab === 'backtest' && <BacktestPanel />}
-
-          {/* Tab 5: Settings */}
+          {/* Tab 2: Settings */}
           {activeTab === 'settings' && (
             <div className="flex-1 p-4 md:p-6 pb-24 md:pb-6 overflow-y-auto space-y-5">
               <div>
                 <h2 className="text-xl font-bold text-zinc-100">Cấu hình Hệ thống</h2>
                 <p className="text-xs text-zinc-400 mt-0.5">
-                  Quản lý API Key, Kênh Cảnh báo Discord/Telegram & Động cơ Quản trị Rủi ro
+                  Quản lý API Key AI & Kênh Thông báo Discord/Telegram
                 </p>
               </div>
 
@@ -205,7 +186,7 @@ export default function Home() {
                 {/* Alert Webhooks */}
                 <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-5 space-y-4">
                   <h3 className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
-                    Kênh Cảnh báo
+                    Kênh Thông báo
                   </h3>
                   <div className="space-y-3">
                     <div>
@@ -222,90 +203,51 @@ export default function Home() {
                         className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
                       />
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                          Telegram Bot Token
-                        </label>
-                        <input
-                          type="password"
-                          value={settings.telegramBotToken}
-                          onChange={(e) =>
-                            setSettings({ ...settings, telegramBotToken: e.target.value })
-                          }
-                          placeholder="1234:abc..."
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                          Chat ID
-                        </label>
-                        <input
-                          type="text"
-                          value={settings.telegramChatId}
-                          onChange={(e) =>
-                            setSettings({ ...settings, telegramChatId: e.target.value })
-                          }
-                          placeholder="-100..."
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
-                        />
-                      </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                        Telegram Bot Token
+                      </label>
+                      <input
+                        type="password"
+                        value={settings.telegramBotToken}
+                        onChange={(e) =>
+                          setSettings({ ...settings, telegramBotToken: e.target.value })
+                        }
+                        placeholder="123456789:ABCdef..."
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                        Telegram Chat ID
+                      </label>
+                      <input
+                        type="text"
+                        value={settings.telegramChatId}
+                        onChange={(e) =>
+                          setSettings({ ...settings, telegramChatId: e.target.value })
+                        }
+                        placeholder="-100123456789"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
+                      />
                     </div>
                   </div>
                 </div>
-
-                {/* Risk Parameters */}
-                <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-5 space-y-4 md:col-span-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-widest text-emerald-400">
-                    Tham số Động cơ Rủi ro (Risk Guardrails)
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[
-                      { key: 'maxPositionSize', label: 'Tối đa Portfolio / Lệnh (%)', min: 1, max: 100 },
-                      { key: 'stopLoss', label: 'Cắt lỗ tối đa (%)', min: 0.5, max: 20 },
-                      { key: 'maxDrawdown', label: 'Drawdown tối đa (%)', min: 5, max: 50 },
-                      { key: 'dailyLossLimit', label: 'Giới hạn lỗ ngày (%)', min: 1, max: 20 },
-                    ].map(({ key, label, min, max }) => (
-                      <div key={key}>
-                        <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                          {label}
-                        </label>
-                        <input
-                          type="number"
-                          value={settings[key as keyof typeof settings]}
-                          onChange={(e) =>
-                            setSettings({ ...settings, [key]: Number(e.target.value) })
-                          }
-                          min={min}
-                          max={max}
-                          step="0.5"
-                          className="w-full bg-zinc-950 border border-zinc-800 rounded-xl p-2.5 text-sm text-zinc-200 focus:outline-none focus:border-emerald-500/50 transition-colors font-mono"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
               </div>
 
-              <div className="flex items-center gap-4 max-w-4xl">
-                <button
-                  onClick={handleSaveSettings}
-                  disabled={isSavingSettings}
-                  className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 font-bold py-2.5 px-8 rounded-xl transition-all active:scale-[0.98] shadow-[0_0_20px_rgba(16,185,129,0.25)] cursor-pointer"
-                >
-                  {isSavingSettings ? 'Đang lưu...' : 'Lưu Cấu hình'}
-                </button>
-                {settingsMsg && (
-                  <span
-                    className={`text-sm font-medium ${
-                      settingsMsg.startsWith('Lỗi') ? 'text-rose-400' : 'text-emerald-400'
-                    }`}
-                  >
-                    {settingsMsg}
-                  </span>
-                )}
-              </div>
+              {settingsMsg && (
+                <p className={`text-xs ${settingsMsg.startsWith('Lỗi') ? 'text-rose-400' : 'text-emerald-400'}`}>
+                  {settingsMsg}
+                </p>
+              )}
+
+              <button
+                onClick={handleSaveSettings}
+                disabled={isSavingSettings}
+                className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 font-bold px-6 py-2.5 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+              >
+                {isSavingSettings ? 'Đang lưu...' : 'Lưu Cấu hình'}
+              </button>
             </div>
           )}
         </div>

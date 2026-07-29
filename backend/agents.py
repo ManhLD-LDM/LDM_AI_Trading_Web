@@ -19,9 +19,11 @@ if GEMINI_API_KEY:
 FALLBACK_MODEL = "gemini-2.0-flash"  # Khi Gemma 500, dùng Gemini làm fallback
 
 
-def calculate_atr(candles: list, period: int = 14) -> float:
+def calculate_atr(candles, period: int = 14) -> float:
     """Tính chỉ số ATR (Average True Range) từ danh sách nến [[ts, open, high, low, close, vol], ...]"""
-    if not candles or len(candles) < 2:
+    if hasattr(candles, 'tolist'):
+        candles = candles.tolist()
+    if candles is None or len(candles) < 2:
         return 10.0
     
     true_ranges = []
@@ -36,9 +38,11 @@ def calculate_atr(candles: list, period: int = 14) -> float:
     return sum(recent_tr) / len(recent_tr) if recent_tr else 10.0
 
 
-def calculate_swing_levels(candles: list, window: int = 20) -> tuple[float, float]:
+def calculate_swing_levels(candles, window: int = 20) -> tuple[float, float]:
     """Tính mốc Swing Low và Swing High của 20 nến gần nhất"""
-    if not candles:
+    if hasattr(candles, 'tolist'):
+        candles = candles.tolist()
+    if candles is None or len(candles) == 0:
         return 0.0, 0.0
     
     recent = candles[-window:]

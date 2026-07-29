@@ -290,8 +290,10 @@ async def get_ai_consultation(
     try:
         from binance_api import get_historical_klines
         candles = await get_historical_klines(sym, interval, limit=50)
+        if hasattr(candles, 'tolist'):
+            candles = candles.tolist()
         
-        if not candles or len(candles) < 5:
+        if candles is None or len(candles) < 5:
             raise HTTPException(400, f"Insufficient candle data for {sym}")
         
         current_price = float(candles[-1][4])

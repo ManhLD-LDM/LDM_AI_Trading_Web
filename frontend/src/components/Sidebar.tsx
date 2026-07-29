@@ -1,13 +1,54 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
-import { useTradingStore, AIConsultPlan } from '@/store/useStore';
+import { useTradingStore, AIConsultPlan, AIPlanStatus } from '@/store/useStore';
 import { apiGet } from '@/lib/api';
-import { X, Sparkles, Activity, History, TrendingUp, TrendingDown, Eye, ChevronRight, RefreshCw } from 'lucide-react';
+import { X, Sparkles, History, TrendingUp, TrendingDown, ChevronRight, RefreshCw, Clock, Zap, CheckCircle2, Trophy, ShieldCheck, AlertOctagon } from 'lucide-react';
 import AIOrderDetailsModal from './AIOrderDetailsModal';
 
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
+}
+
+export function getStatusBadge(status?: AIPlanStatus) {
+  switch (status) {
+    case 'ACTIVE':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-blue-500/20 text-blue-400 border border-blue-500/40 flex items-center gap-1 animate-pulse">
+          <Zap size={11} /> ĐANG CHẠY
+        </span>
+      );
+    case 'PARTIAL_TP1':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center gap-1">
+          <CheckCircle2 size={11} /> THẮNG 50% (BE)
+        </span>
+      );
+    case 'WIN_100':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-teal-500/30 text-teal-300 border border-teal-400 flex items-center gap-1 shadow-[0_0_8px_rgba(20,184,166,0.3)]">
+          <Trophy size={11} /> THẮNG 100%
+        </span>
+      );
+    case 'WIN_BE':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-cyan-500/20 text-cyan-400 border border-cyan-500/40 flex items-center gap-1">
+          <ShieldCheck size={11} /> HÒA BE
+        </span>
+      );
+    case 'LOSS':
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40 flex items-center gap-1">
+          <AlertOctagon size={11} /> HIT SL (THUA)
+        </span>
+      );
+    default:
+      return (
+        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+          <Clock size={11} /> CHỜ ENTRY
+        </span>
+      );
+  }
 }
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
@@ -22,7 +63,6 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     try {
       const res = await apiGet<{ history: AIConsultPlan[] }>('/api/live/ai-consult/history', token);
       if (res && res.history && Array.isArray(res.history)) {
-        // Replace with deduplicated database history
         setAiConsultHistory(res.history);
       }
     } catch (e) {
@@ -100,7 +140,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                 <div
                   key={plan.id || idx}
                   onClick={() => handleOpenDetails(plan)}
-                  className="group bg-zinc-950 p-3.5 rounded-xl border border-zinc-800/90 hover:border-emerald-500/40 transition-all cursor-pointer space-y-2 font-mono text-xs shadow-md active:scale-[0.98]"
+                  className="group bg-zinc-950 p-3.5 rounded-xl border border-zinc-800/90 hover:border-emerald-500/40 transition-all cursor-pointer space-y-2.5 font-mono text-xs shadow-md active:scale-[0.98]"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -114,20 +154,19 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                       </span>
                       <span className="font-bold text-zinc-200">{plan.symbol}</span>
                     </div>
-                    <span className="text-[10px] text-zinc-500 font-mono">
-                      {new Date(plan.timestamp || Date.now()).toLocaleTimeString()}
-                    </span>
+
+                    {getStatusBadge(plan.status)}
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-1">
-                    <span>Entry: <strong className="text-zinc-200">${plan.entryZone.idealEntry.toLocaleString()}</strong></span>
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
+                    <span>Entry: <strong className="text-blue-400">${plan.entryZone.idealEntry.toLocaleString()}</strong></span>
                     <span className="text-emerald-400 font-bold">{plan.confidence}% Tin cậy</span>
                   </div>
 
                   <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-[10px]">
-                    <span className="text-rose-400">SL: ${plan.stopLoss.price}</span>
+                    <span className="text-rose-400">SL: ${plan.currentSlPrice || plan.stopLoss.price}</span>
                     <span className="text-emerald-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform font-bold">
-                      <span>Xem Chi Tiết</span>
+                      <span>Chi tiết</span>
                       <ChevronRight size={12} />
                     </span>
                   </div>

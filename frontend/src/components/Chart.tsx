@@ -414,15 +414,19 @@ export default function ChartComponent() {
       const message = JSON.parse(event.data);
       const kline = message.k;
       if (seriesRef.current) {
+        const closePrice = parseFloat(kline.c);
         const newKline = {
           time: (kline.t / 1000) as UTCTimestamp,
           open: parseFloat(kline.o),
           high: parseFloat(kline.h),
           low: parseFloat(kline.l),
-          close: parseFloat(kline.c),
+          close: closePrice,
           volume: parseFloat(kline.v),
         };
         seriesRef.current.update(newKline);
+        
+        // Evaluate AI order plans in real time against live price
+        useTradingStore.getState().updatePlanPriceTick(pair, closePrice);
         
         setChartData(prev => {
           if (prev.length === 0) {

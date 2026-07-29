@@ -383,3 +383,36 @@ async def get_ai_consultation_history(
     return {"history": docs, "count": len(docs)}
 
 
+@router.put("/ai-consult/status")
+async def update_ai_consultation_status(
+    data: dict,
+    current_user_email: str = Depends(get_current_user)
+):
+    """Cập nhật trạng thái lệnh AI (PENDING, ACTIVE, PARTIAL_TP1, WIN_100, WIN_BE, LOSS) trong MongoDB."""
+    if not is_connected():
+        return {"status": "ok"}
+
+    plan_id = data.get("id")
+    status = data.get("status")
+    if not plan_id or not status:
+        raise HTTPException(400, "Missing plan id or status")
+
+    db = get_database()
+    update_data = {
+        "status": status,
+        "updated_at": datetime.now(timezone.utc),
+    }
+    if data.get("activatedAt"):
+        update_data["activatedAt"] = data["activatedAt"]
+    if data.get("completedAt"):
+        update_data["completedAt"] = data["completedAt"]
+    if data.get("currentSlPrice"):
+        update_data["currentSlPrice"] = data["currentSlPrice"]
+
+    await db["ai_consultations"].update_one(
+        {"email": current_user_email, "id": plan_id},
+        {"$set": update_data}
+    )
+    return {"status": "updated", "id": plan_id, "new_status": status}
+
+

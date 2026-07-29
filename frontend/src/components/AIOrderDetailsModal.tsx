@@ -1,6 +1,7 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
 import { AIConsultPlan } from '@/store/useStore';
+import { getStatusBadge } from './Sidebar';
 import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, CandlestickSeries } from 'lightweight-charts';
 import {
   X, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, TrendingDown,
@@ -24,14 +25,13 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
 
   const isLong = plan.recommendation === 'LONG';
   const entry = plan.entryZone.idealEntry;
-  const sl = plan.stopLoss.price;
+  const sl = plan.currentSlPrice || plan.stopLoss.price;
   const tp1 = plan.takeProfit[0]?.price || (isLong ? entry * 1.015 : entry * 0.985);
   const tp2 = plan.takeProfit[1]?.price || (isLong ? entry * 1.03 : entry * 0.97);
 
   useEffect(() => {
     if (!chartContainerRef.current) return;
 
-    // 1. Initialize Lightweight Chart instance with interactive Scroll & Scale enabled
     const chart = createChart(chartContainerRef.current, {
       layout: {
         background: { type: ColorType.Solid, color: '#090d14' },
@@ -81,12 +81,10 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
     chartRef.current = chart;
     seriesRef.current = series;
 
-    // 2. Fetch 100 historical 15m candles from Binance API for this symbol
     const fetchKlines = async () => {
       setIsLoading(true);
       try {
         const sym = plan.symbol.toUpperCase().replace('/', '');
-        // Fixed 15m interval and 100 candles limit as requested by user
         const res = await fetch(`https://api.binance.com/api/v3/klines?symbol=${sym}&interval=15m&limit=100`);
         const data = await res.json();
         
@@ -101,7 +99,6 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
 
           series.setData(parsed);
 
-          // Clear old lines
           priceLinesRef.current.forEach(l => series.removePriceLine(l));
           priceLinesRef.current = [];
 
@@ -110,36 +107,37 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
             price: entry,
             color: '#3b82f6',
             lineWidth: 2,
-            lineStyle: 0, // Solid
+            lineStyle: 0,
             axisLabelVisible: true,
             title: `ENTRY: $${entry.toLocaleString()}`,
           });
 
+          const isSlBe = plan.status === 'PARTIAL_TP1' || plan.status === 'WIN_BE';
           const lineSL = series.createPriceLine({
             price: sl,
-            color: '#f43f5e',
+            color: isSlBe ? '#06b6d4' : '#f43f5e',
             lineWidth: 2,
-            lineStyle: 0, // Solid
+            lineStyle: 0,
             axisLabelVisible: true,
-            title: `SL (-${plan.stopLoss.percentage}%): $${sl.toLocaleString()}`,
+            title: isSlBe ? `SL (Đã dời BE): $${sl.toLocaleString()}` : `SL (-${plan.stopLoss.percentage}%): $${sl.toLocaleString()}`,
           });
 
           const lineTP1 = series.createPriceLine({
             price: tp1,
             color: '#10b981',
             lineWidth: 2,
-            lineStyle: 2, // Dashed
+            lineStyle: 2,
             axisLabelVisible: true,
-            title: `TP1: $${tp1.toLocaleString()}`,
+            title: `TP1 (Thắng 50%): $${tp1.toLocaleString()}`,
           });
 
           const lineTP2 = series.createPriceLine({
             price: tp2,
             color: '#14b8a6',
             lineWidth: 2,
-            lineStyle: 2, // Dashed
+            lineStyle: 2,
             axisLabelVisible: true,
-            title: `TP2: $${tp2.toLocaleString()}`,
+            title: `TP2 (Thắng 100%): $${tp2.toLocaleString()}`,
           });
 
           priceLinesRef.current = [lineEntry, lineSL, lineTP1, lineTP2];
@@ -178,32 +176,30 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
     <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4 space-y-3 font-sans">
       <div className="flex items-center justify-between text-xs font-mono text-zinc-400">
         <span className="flex items-center gap-1.5 text-emerald-400 font-bold">
-          <LineChart size={15} /> 100 nến thực tế khung 15M ({plan.symbol}) tại thời điểm xuất lệnh
+          <LineChart size={15} /> 100 nến 15M ({plan.symbol}) - Theo dõi Tiến trình Realtime
         </span>
         <span className="text-[11px] text-zinc-400 bg-zinc-900 px-2.5 py-0.5 rounded-lg border border-zinc-800 font-mono flex items-center gap-1">
-          <ZoomIn size={12} className="text-emerald-400" /> Co giãn / Lăn chuột thu phóng
+          <ZoomIn size={12} className="text-emerald-400" /> Thu phóng co giãn
         </span>
       </div>
 
-      {/* Lightweight TradingView Chart Container with Mouse Zoom/Pan enabled */}
       <div className="relative w-full h-72 overflow-hidden bg-[#090d14] rounded-xl border border-zinc-800 shadow-inner">
         {isLoading && (
           <div className="absolute inset-0 z-10 bg-zinc-950/80 backdrop-blur-xs flex items-center justify-center gap-2 text-xs font-mono text-emerald-400">
             <RefreshCw size={16} className="animate-spin" />
-            <span>Đang nạp 100 nến khung 15m...</span>
+            <span>Đang nạp dữ liệu nến...</span>
           </div>
         )}
         <div ref={chartContainerRef} className="w-full h-full cursor-crosshair" />
       </div>
 
-      {/* Chart Legend */}
       <div className="flex flex-wrap items-center justify-between text-[11px] font-mono text-zinc-400 pt-1">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-blue-500 rounded inline-block" /> Entry AI</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-emerald-500 rounded inline-block" /> Mốc TP1 / TP2</span>
-          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-rose-500 rounded inline-block" /> Mốc Stop Loss</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-emerald-500 rounded inline-block" /> TP1 (50%) / TP2 (100%)</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-1 bg-rose-500 rounded inline-block" /> Stop Loss (BE)</span>
         </div>
-        <span className="text-zinc-400 font-bold">Khung: 15M • 100 Nến • Chế độ: {plan.mode || 'SCALP'}</span>
+        <span className="text-zinc-400 font-bold">Khung: 15M • Chế độ: {plan.mode || 'SCALP'}</span>
       </div>
     </div>
   );
@@ -231,8 +227,10 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
               <span>{plan.recommendation} {plan.symbol}</span>
             </div>
 
+            {getStatusBadge(plan.status)}
+
             <div className="text-xs font-mono text-zinc-400">
-              Khung nến: <strong className="text-zinc-200 uppercase">15M</strong> • Độ tin cậy: <strong className="text-emerald-400">{plan.confidence}%</strong>
+              Khung: <strong className="text-zinc-200 uppercase">15M</strong> • Tin cậy: <strong className="text-emerald-400">{plan.confidence}%</strong>
             </div>
           </div>
 
@@ -255,63 +253,63 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
             </div>
 
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono">
-              <div className="text-[10px] text-zinc-400 mb-1">Cắt lỗ (SL)</div>
-              <div className="text-base font-bold text-rose-400">${plan.stopLoss.price.toLocaleString()}</div>
-              <div className="text-[10px] text-rose-400/80">-{plan.stopLoss.percentage}%</div>
+              <div className="text-[10px] text-zinc-400 mb-1">Stop Loss hiện tại</div>
+              <div className="text-base font-bold text-rose-400">${(plan.currentSlPrice || plan.stopLoss.price).toLocaleString()}</div>
+              <div className="text-[10px] text-rose-400/80">{plan.status === 'PARTIAL_TP1' ? 'Đã dời BE' : `-${plan.stopLoss.percentage}%`}</div>
             </div>
 
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono">
-              <div className="text-[10px] text-zinc-400 mb-1">Tỷ lệ Risk:Reward</div>
+              <div className="text-[10px] text-zinc-400 mb-1">Risk:Reward</div>
               <div className="text-base font-bold text-emerald-400">1 : {plan.riskRewardRatio}</div>
-              <div className="text-[10px] text-zinc-500">Đòn bẩy: {plan.suggestedLeverage}</div>
+              <div className="text-[10px] text-zinc-500">Leverage: {plan.suggestedLeverage}</div>
             </div>
           </div>
 
           {/* Rationale & Authentic Proof */}
           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
-              <Sparkles size={14} /> Bằng chứng Thực tế & Lý do Kỹ thuật của AI
+              <Sparkles size={14} /> Tiến trình & Lý do Kỹ thuật của AI
             </h4>
 
             <div className="space-y-2.5 text-xs text-zinc-300">
+              {plan.activatedAt && (
+                <div className="flex items-center gap-2 bg-blue-500/10 p-2 rounded-lg border border-blue-500/20 text-blue-300 font-mono">
+                  <Clock size={14} />
+                  <span>Đã khớp Entry lúc: {new Date(plan.activatedAt).toLocaleTimeString()}</span>
+                </div>
+              )}
+
+              {plan.completedAt && (
+                <div className="flex items-center gap-2 bg-emerald-500/10 p-2 rounded-lg border border-emerald-500/20 text-emerald-300 font-mono">
+                  <CheckCircle2 size={14} />
+                  <span>Kết thúc lệnh lúc: {new Date(plan.completedAt).toLocaleTimeString()}</span>
+                </div>
+              )}
+
               {plan.stopLoss.rationale && (
                 <div className="flex items-start gap-2 bg-zinc-900/60 p-2.5 rounded-lg border border-zinc-800">
                   <ShieldCheck size={14} className="text-rose-400 shrink-0 mt-0.5" />
-                  <p><strong className="text-zinc-200">Lý do cài SL:</strong> {plan.stopLoss.rationale}</p>
+                  <p><strong className="text-zinc-200">Quản trị SL:</strong> {plan.stopLoss.rationale}</p>
                 </div>
               )}
 
               {plan.analysisSummary.candlestickPattern && (
                 <div className="flex items-start gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                  <p><strong className="text-zinc-200">Hợp lưu Đa Khung (15m):</strong> {plan.analysisSummary.candlestickPattern}</p>
-                </div>
-              )}
-
-              {plan.analysisSummary.technicalConfluence && (
-                <div className="flex items-start gap-2">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5 shrink-0" />
-                  <p><strong className="text-zinc-200">Hội tụ Chỉ số:</strong> {plan.analysisSummary.technicalConfluence}</p>
+                  <p><strong className="text-zinc-200">Hợp lưu Đa Khung:</strong> {plan.analysisSummary.candlestickPattern}</p>
                 </div>
               )}
 
               {plan.analysisSummary.newsSentiment && (
                 <div className="flex items-start gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                  <p><strong className="text-zinc-200">Bằng chứng Tin tức:</strong> {plan.analysisSummary.newsSentiment}</p>
-                </div>
-              )}
-
-              {plan.analysisSummary.keyWarning && (
-                <div className="flex items-start gap-2 bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20 text-amber-300">
-                  <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-                  <p><strong>Cảnh báo biến động:</strong> {plan.analysisSummary.keyWarning}</p>
+                  <p><strong className="text-zinc-200">Tâm lý Tin tức:</strong> {plan.analysisSummary.newsSentiment}</p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Interactive TradingView Setup Chart (100 candles, 15m, Zoom/Scale) */}
+          {/* Interactive TradingView Setup Chart */}
           <RealLightweightSetupChart plan={plan} />
         </div>
       </div>

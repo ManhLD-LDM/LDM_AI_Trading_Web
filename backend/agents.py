@@ -38,8 +38,8 @@ def calculate_atr(candles, period: int = 14) -> float:
     return sum(recent_tr) / len(recent_tr) if recent_tr else 10.0
 
 
-def calculate_swing_levels(candles, window: int = 20) -> tuple[float, float]:
-    """Tính mốc Swing Low và Swing High của 20 nến gần nhất"""
+def calculate_swing_levels(candles, window: int = 50) -> tuple[float, float]:
+    """Tính mốc Swing Low và Swing High của 50 nến gần nhất để có cản hỗ trợ/kháng cự chuẩn xác"""
     if hasattr(candles, 'tolist'):
         candles = candles.tolist()
     if candles is None or len(candles) == 0:
@@ -96,8 +96,8 @@ async def call_agent(system_prompt: str, user_prompt: str, response_mime_type: s
 class TechnicalAgent:
     async def analyze(self, kronos_prediction: dict, recent_candles: list, interval: str) -> str:
         sys_prompt = "Bạn là Technical Analyst chuyên nghiệp. Hãy đọc dữ liệu nến và dự báo xu hướng. PHẦN PHÂN TÍCH PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
-        candles_str = "\n".join([f"Open: {c[1]}, High: {c[2]}, Low: {c[3]}, Close: {c[4]}, Vol: {c[5]}" for c in recent_candles[-10:]])
-        user_prompt = f"Timeframe: {interval}\nKronos Quantum Trend: {kronos_prediction.get('trend')} (Confidence: {kronos_prediction.get('confidence')}%)\n10 nến gần nhất:\n{candles_str}"
+        candles_str = "\n".join([f"Open: {c[1]}, High: {c[2]}, Low: {c[3]}, Close: {c[4]}, Vol: {c[5]}" for c in recent_candles[-20:]])
+        user_prompt = f"Timeframe: {interval}\nKronos Quantum Trend: {kronos_prediction.get('trend')} (Confidence: {kronos_prediction.get('confidence')}%)\n20 nến gần nhất:\n{candles_str}"
         return await call_agent(sys_prompt, user_prompt)
 
 

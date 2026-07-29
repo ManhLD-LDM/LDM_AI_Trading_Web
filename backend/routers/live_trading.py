@@ -289,7 +289,7 @@ async def get_ai_consultation(
 
     try:
         from binance_api import get_historical_klines
-        candles = await get_historical_klines(sym, interval, limit=50)
+        candles = await get_historical_klines(sym, interval, limit=100)
         if hasattr(candles, 'tolist'):
             candles = candles.tolist()
         

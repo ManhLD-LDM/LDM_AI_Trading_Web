@@ -130,12 +130,15 @@ class TraderAgent:
             f"Tài sản: {symbol} | Timeframe: {interval} | Giá hiện tại: {current_price}. "
             f"Chỉ số ATR(14) = {atr:.2f}. Mốc Swing Low 20 nến = {swing_low:.2f}, Swing High = {swing_high:.2f}. "
             "Dựa trên phân tích kỹ thuật và tin tức, hãy lập một Kế hoạch Giao dịch Vị thế (Trading Blueprint) hoàn chỉnh. "
+            "QUY TẮC QUẢN TRỊ RỦI RO BẮT BUỘC:\n"
+            "1. Khoảng cách Stop Loss (SL) KHÔNG ĐƯỢC quá hẹp (tối thiểu 0.8% - 1.5% hoặc ít nhất 2*ATR) để tránh bị quét râu nến (Stop Hunting).\n"
+            "2. Với lệnh LONG, SL phải nằm dưới mốc Swing Low hỗ trợ. Với lệnh SHORT, SL phải nằm trên mốc Swing High kháng cự.\n"
             "Trả về ĐÚNG MỘT OBJECT JSON duy nhất không chứa bất kỳ văn bản nào khác ngoài JSON theo đúng định dạng:\n"
             "{\n"
             '  "recommendation": "LONG" | "SHORT" | "WAIT",\n'
             '  "confidence": 85,\n'
             '  "entryZone": {"minPrice": float, "maxPrice": float, "idealEntry": float},\n'
-            '  "stopLoss": {"price": float, "percentage": float, "rationale": "Lý do bằng Tiếng Việt"},\n'
+            '  "stopLoss": {"price": float, "percentage": float, "rationale": "Lý do đặt SL dựa trên Swing/ATR bằng Tiếng Việt"},\n'
             '  "takeProfit": [\n'
             '    {"level": "TP1 (50% Vị thế)", "price": float, "rrRatio": "1:1.5", "closePct": 50},\n'
             '    {"level": "TP2 (Chốt hết)", "price": float, "rrRatio": "1:2.5", "closePct": 50}\n'
@@ -165,10 +168,21 @@ class TraderAgent:
                 clean_text = clean_text[:-3]
 
             plan = json.loads(clean_text.strip())
-            # Basic key validation
             if "recommendation" in plan and "entryZone" in plan and "stopLoss" in plan:
                 plan["symbol"] = symbol
                 plan["interval"] = interval
+                
+                # Safety check: enforce minimum SL distance (at least 0.8% or 2*ATR) to prevent noise stop-outs
+                sl_dist = abs(current_price - float(plan["stopLoss"]["price"]))
+                min_safe_dist = max(2.0 * atr, current_price * 0.008)
+                if sl_dist < min_safe_dist:
+                    is_long_plan = plan["recommendation"] == "LONG"
+                    safe_sl_price = round(min(current_price - min_safe_dist, swing_low), 2) if is_long_plan else round(max(current_price + min_safe_dist, swing_high), 2)
+                    safe_sl_pct = round(abs(current_price - safe_sl_price) / current_price * 100, 2)
+                    plan["stopLoss"]["price"] = safe_sl_price
+                    plan["stopLoss"]["percentage"] = safe_sl_pct
+                    plan["stopLoss"]["rationale"] += f" (Đã tự động nới rộng SL an toàn >0.8% để tránh quét râu nến)."
+
                 return plan
         except Exception as e:
             agent_logger.warning(f"TraderAgent consult JSON parse failed: {e}. Generating math-anchored fallback plan.")
@@ -177,7 +191,8 @@ class TraderAgent:
         is_long = kronos_prediction.get("trend") != "DOWN"
         rec = "LONG" if is_long else "SHORT"
         
-        sl_price = round(current_price - 1.5 * atr, 2) if is_long else round(current_price + 1.5 * atr, 2)
+        safe_dist = max(2.0 * atr, current_price * 0.01)
+        sl_price = round(min(current_price - safe_dist, swing_low), 2) if is_long else round(max(current_price + safe_dist, swing_high), 2)
         sl_pct = round(abs(current_price - sl_price) / current_price * 100, 2)
         
         tp1_price = round(current_price + (current_price - sl_price) * 1.5, 2) if is_long else round(current_price - (sl_price - current_price) * 1.5, 2)

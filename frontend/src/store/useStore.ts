@@ -118,8 +118,8 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
   return {
     user: typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null,
     token: typeof window !== 'undefined' ? localStorage.getItem('token') : null,
-    pair: 'BTCUSDT',
-    interval: '1m',
+    pair: typeof window !== 'undefined' ? (localStorage.getItem('user_pair') || 'BTCUSDT') : 'BTCUSDT',
+    interval: typeof window !== 'undefined' ? (localStorage.getItem('user_interval') || '15m') : '15m',
     signals: [],
     indicators: defaultIndicators,
     aiConsultPlan: null,
@@ -275,8 +275,16 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
     }),
 
     setIsAiConsultLoading: (loading) => set({ isAiConsultLoading: loading }),
-    setPair: (pair) => { set({ pair }); syncPreferences(); },
-    setInterval: (interval) => { set({ interval }); syncPreferences(); },
+    setPair: (pair) => {
+      if (typeof window !== 'undefined') localStorage.setItem('user_pair', pair);
+      set({ pair });
+      syncPreferences();
+    },
+    setInterval: (interval) => {
+      if (typeof window !== 'undefined') localStorage.setItem('user_interval', interval);
+      set({ interval });
+      syncPreferences();
+    },
     addSignal: (signal) => set((state) => ({ signals: [...state.signals, signal] })),
     clearSignals: () => set({ signals: [] }),
     toggleIndicator: (instanceId) => set((state) => ({
@@ -313,8 +321,14 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
       }
       const updates: Partial<TradingStore> = { user, token };
       if (user.preferences) {
-        if (user.preferences.pair) updates.pair = user.preferences.pair;
-        if (user.preferences.interval) updates.interval = user.preferences.interval;
+        if (user.preferences.pair) {
+          updates.pair = user.preferences.pair;
+          if (typeof window !== 'undefined') localStorage.setItem('user_pair', user.preferences.pair);
+        }
+        if (user.preferences.interval) {
+          updates.interval = user.preferences.interval;
+          if (typeof window !== 'undefined') localStorage.setItem('user_interval', user.preferences.interval);
+        }
         if (user.preferences.indicators) updates.indicators = user.preferences.indicators;
       }
       set(updates);

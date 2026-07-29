@@ -350,6 +350,18 @@ async def get_ai_consultation(
             }
             await db["ai_consultations"].insert_one(doc)
 
+            # Auto-prune old plans if count exceeds 100 per user to conserve MongoDB Cloud Free Tier storage
+            user_doc_count = await db["ai_consultations"].count_documents({"email": current_user_email})
+            if user_doc_count > 100:
+                oldest_docs = await db["ai_consultations"].find(
+                    {"email": current_user_email},
+                    sort=[("created_at", 1)],
+                    limit=user_doc_count - 100
+                ).to_list(user_doc_count - 100)
+                oldest_ids = [d["_id"] for d in oldest_docs]
+                if oldest_ids:
+                    await db["ai_consultations"].delete_many({"_id": {"$in": oldest_ids}})
+
         return consultation_plan
     except HTTPException as he:
         raise he

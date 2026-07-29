@@ -11,7 +11,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
-  const { pair, interval, aiConsultHistory, aiConsultPlan, token, setAiConsultPlan } = useTradingStore();
+  const { pair, interval, aiConsultHistory, aiConsultPlan, token, setAiConsultHistory } = useTradingStore();
   const [selectedPlan, setSelectedPlan] = useState<AIConsultPlan | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -21,18 +21,16 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     setIsLoadingHistory(true);
     try {
       const res = await apiGet<{ history: AIConsultPlan[] }>('/api/live/ai-consult/history', token);
-      if (res && res.history && Array.isArray(res.history) && res.history.length > 0) {
-        // Sync database history into Zustand store
-        res.history.forEach((plan) => {
-          useTradingStore.getState().setAiConsultPlan(plan);
-        });
+      if (res && res.history && Array.isArray(res.history)) {
+        // Replace with deduplicated database history
+        setAiConsultHistory(res.history);
       }
     } catch (e) {
       console.warn('Failed to fetch AI history from DB:', e);
     } finally {
       setIsLoadingHistory(false);
     }
-  }, [token]);
+  }, [token, setAiConsultHistory]);
 
   useEffect(() => {
     fetchHistoryFromDb();
@@ -43,10 +41,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
     setIsModalOpen(true);
   };
 
-  // Combine current active plan and historical plans
-  const allPlans = aiConsultHistory.length > 0
-    ? aiConsultHistory
-    : (aiConsultPlan ? [aiConsultPlan] : []);
+  const allPlans = aiConsultHistory;
 
   return (
     <>

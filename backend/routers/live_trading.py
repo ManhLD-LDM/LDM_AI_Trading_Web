@@ -339,9 +339,12 @@ async def get_ai_consultation(
         # Persist consultation plan to MongoDB for user history retention
         if is_connected():
             db = get_database()
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+            doc_id = f"plan_{now_ms}_{sym}_{interval}"
             doc = {
+                "id": doc_id,
                 "email": current_user_email,
-                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                "timestamp": now_ms,
                 "created_at": datetime.now(timezone.utc),
                 **consultation_plan,
             }
@@ -372,7 +375,9 @@ async def get_ai_consultation_history(
     )
     docs = await cursor.to_list(min(limit, 100))
     for d in docs:
-        d.pop("_id", None)
+        if "_id" in d:
+            d["id"] = d.get("id") or str(d["_id"])
+            d.pop("_id", None)
         if isinstance(d.get("created_at"), datetime):
             d["created_at"] = d["created_at"].isoformat()
     return {"history": docs, "count": len(docs)}

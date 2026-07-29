@@ -27,6 +27,7 @@ export type AIConsultPlan = {
   timestamp?: number;
   symbol: string;
   interval: string;
+  mode?: string;
   recommendation: 'LONG' | 'SHORT' | 'WAIT';
   confidence: number;
   entryZone: {
@@ -75,6 +76,7 @@ interface TradingStore {
   removeIndicator: (instanceId: string) => void;
   updateIndicatorParams: (instanceId: string, params: Record<string, any>) => void;
   setAiConsultPlan: (plan: AIConsultPlan | null) => void;
+  setAiConsultHistory: (history: AIConsultPlan[]) => void;
   setIsAiConsultLoading: (loading: boolean) => void;
   login: (user: User, token: string) => void;
   logout: () => void;
@@ -86,6 +88,11 @@ const defaultIndicators: IndicatorConfig[] = [
   { instanceId: 'rsi_1', indicatorId: 'rsi', params: { period: 14, color: '#8b5cf6' }, active: false },
   { instanceId: 'macd_1', indicatorId: 'macd', params: { fastPeriod: 12, slowPeriod: 26, signalPeriod: 9 }, active: false },
 ];
+
+function getPlanDedupeKey(p: AIConsultPlan): string {
+  if (p.id) return p.id;
+  return `${p.timestamp || ''}_${p.symbol}_${p.interval}_${p.recommendation}_${p.entryZone?.idealEntry || ''}`;
+}
 
 export const useTradingStore = create<TradingStore>()((set, get) => {
   const syncPreferences = async () => {
@@ -113,15 +120,34 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
     isAiConsultLoading: false,
     setAiConsultPlan: (plan) => set((state) => {
       if (!plan) return { aiConsultPlan: null };
+      const planKey = getPlanDedupeKey(plan);
       const planWithMeta: AIConsultPlan = {
         ...plan,
-        id: plan.id || `plan_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        id: planKey,
         timestamp: plan.timestamp || Date.now(),
       };
+      
+      const filtered = state.aiConsultHistory.filter(p => getPlanDedupeKey(p) !== planKey);
       return {
         aiConsultPlan: planWithMeta,
-        aiConsultHistory: [planWithMeta, ...state.aiConsultHistory.filter(p => p.id !== planWithMeta.id)].slice(0, 50),
+        aiConsultHistory: [planWithMeta, ...filtered].slice(0, 50),
       };
+    }),
+    setAiConsultHistory: (history) => set(() => {
+      const seen = new Set<string>();
+      const deduplicated: AIConsultPlan[] = [];
+      for (const p of history) {
+        const key = getPlanDedupeKey(p);
+        if (!seen.has(key)) {
+          seen.add(key);
+          deduplicated.push({
+            ...p,
+            id: key,
+            timestamp: p.timestamp || Date.now(),
+          });
+        }
+      }
+      return { aiConsultHistory: deduplicated.slice(0, 50) };
     }),
     setIsAiConsultLoading: (loading) => set({ isAiConsultLoading: loading }),
     setPair: (pair) => { set({ pair }); syncPreferences(); },

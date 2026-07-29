@@ -29,6 +29,7 @@ export type AIConsultPlan = {
   timestamp?: number;
   activatedAt?: number;
   completedAt?: number;
+  reanalyzedAt?: string;
   status?: AIPlanStatus;
   currentSlPrice?: number;
   symbol: string;
@@ -60,6 +61,11 @@ export type AIConsultPlan = {
     technicalConfluence?: string;
     newsSentiment?: string;
     keyWarning?: string;
+  };
+  postMortemAnalysis?: {
+    outcomeSummary?: string;
+    keyFactors?: string;
+    learnedLesson?: string;
   };
 };
 
@@ -161,7 +167,6 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
       return { aiConsultHistory: deduplicated.slice(0, 50) };
     }),
 
-    // Realtime Evaluation Engine: Updates AI Signal Status against live market price
     updatePlanPriceTick: (symbol, price) => set((state) => {
       const symUpper = symbol.toUpperCase().replace('/', '');
       let hasStateChanges = false;
@@ -184,7 +189,6 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
         let completedAt = plan.completedAt;
         let currentSlPrice = plan.currentSlPrice || sl;
 
-        // Rule 1: PENDING -> ACTIVE (When live price reaches Entry Zone)
         if (currentStatus === 'PENDING') {
           const entryMin = Math.min(minEntry, maxEntry) * 0.999;
           const entryMax = Math.max(minEntry, maxEntry) * 1.001;
@@ -195,22 +199,21 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
           }
         }
 
-        // Rule 2: ACTIVE -> PARTIAL_TP1 (Hit TP1) or LOSS (Hit SL)
         if (nextStatus === 'ACTIVE') {
           if (isLong) {
             if (price >= tp1) {
               nextStatus = 'PARTIAL_TP1';
-              currentSlPrice = idealEntry; // Move SL to Break-Even (BE)
+              currentSlPrice = idealEntry;
               hasStateChanges = true;
             } else if (price <= sl) {
               nextStatus = 'LOSS';
               completedAt = Date.now();
               hasStateChanges = true;
             }
-          } else { // SHORT
+          } else {
             if (price <= tp1) {
               nextStatus = 'PARTIAL_TP1';
-              currentSlPrice = idealEntry; // Move SL to Break-Even (BE)
+              currentSlPrice = idealEntry;
               hasStateChanges = true;
             } else if (price >= sl) {
               nextStatus = 'LOSS';
@@ -220,24 +223,23 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
           }
         }
 
-        // Rule 3: PARTIAL_TP1 -> WIN_100 (Hit TP2) or WIN_BE (Hit BE)
         if (nextStatus === 'PARTIAL_TP1') {
           if (isLong) {
             if (price >= tp2) {
               nextStatus = 'WIN_100';
               completedAt = Date.now();
               hasStateChanges = true;
-            } else if (price <= idealEntry) { // Hit BE
+            } else if (price <= idealEntry) {
               nextStatus = 'WIN_BE';
               completedAt = Date.now();
               hasStateChanges = true;
             }
-          } else { // SHORT
+          } else {
             if (price <= tp2) {
               nextStatus = 'WIN_100';
               completedAt = Date.now();
               hasStateChanges = true;
-            } else if (price >= idealEntry) { // Hit BE
+            } else if (price >= idealEntry) {
               nextStatus = 'WIN_BE';
               completedAt = Date.now();
               hasStateChanges = true;
@@ -255,7 +257,6 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
           currentSlPrice,
         };
 
-        // Sync updated status to MongoDB
         if (state.token && plan.id) {
           import('@/lib/api').then(({ apiPut }) => {
             apiPut('/api/live/ai-consult/status', {
@@ -264,7 +265,14 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
               activatedAt,
               completedAt,
               currentSlPrice,
-            }, state.token).catch(() => {});
+            }, state.token).then((res: any) => {
+              if (res && res.postMortemAnalysis) {
+                // Update postMortemAnalysis in state
+                useTradingStore.setState((s) => ({
+                  aiConsultHistory: s.aiConsultHistory.map(p => p.id === plan.id ? { ...p, postMortemAnalysis: res.postMortemAnalysis } : p)
+                }));
+              }
+            }).catch(() => {});
           });
         }
 

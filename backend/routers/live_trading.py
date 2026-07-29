@@ -400,7 +400,7 @@ async def update_ai_consultation_status(
     data: dict,
     current_user_email: str = Depends(get_current_user)
 ):
-    """Cập nhật trạng thái lệnh AI (PENDING, ACTIVE, PARTIAL_TP1, WIN_100, WIN_BE, LOSS) trong MongoDB."""
+    """Cập nhật trạng thái lệnh AI (PENDING, ACTIVE, PARTIAL_TP1, WIN_100, WIN_BE, LOSS) và tự động phân tích học chiến lược."""
     if not is_connected():
         return {"status": "ok"}
 
@@ -410,6 +410,10 @@ async def update_ai_consultation_status(
         raise HTTPException(400, "Missing plan id or status")
 
     db = get_database()
+    doc = await db["ai_consultations"].find_one({"email": current_user_email, "id": plan_id})
+    if not doc:
+        return {"status": "not_found"}
+
     update_data = {
         "status": status,
         "updated_at": datetime.now(timezone.utc),
@@ -421,10 +425,109 @@ async def update_ai_consultation_status(
     if data.get("currentSlPrice"):
         update_data["currentSlPrice"] = data["currentSlPrice"]
 
+    # Trigger AI Strategy Learner Post-Mortem if outcome is finished (WIN_100, WIN_BE, PARTIAL_TP1, LOSS)
+    if status in ["WIN_100", "WIN_BE", "PARTIAL_TP1", "LOSS"] and "postMortemAnalysis" not in doc:
+        try:
+            from agents import StrategyLearnerAgent
+            learner = StrategyLearnerAgent()
+            post_mortem = await learner.analyze_outcome(doc, status)
+            update_data["postMortemAnalysis"] = post_mortem
+        except Exception as e:
+            logger.warning(f"Post-mortem strategy learning failed: {e}")
+
     await db["ai_consultations"].update_one(
         {"email": current_user_email, "id": plan_id},
         {"$set": update_data}
     )
-    return {"status": "updated", "id": plan_id, "new_status": status}
+    return {"status": "updated", "id": plan_id, "new_status": status, "postMortemAnalysis": update_data.get("postMortemAnalysis")}
+
+
+@router.post("/ai-consult/reanalyze")
+async def reanalyze_ai_consultation(
+    data: dict,
+    current_user_email: str = Depends(get_current_user)
+):
+    """
+    Phân tích lại Kế hoạch AI Cố vấn cho lệnh có trạng thái CHỜ ENTRY (PENDING).
+    Không cho phép phân tích lại các lệnh đã chạy, thắng hoặc thua.
+    """
+    plan_id = data.get("id")
+    if not plan_id:
+        raise HTTPException(400, "Missing plan id")
+
+    if not is_connected():
+        raise HTTPException(400, "Database not connected")
+
+    db = get_database()
+    doc = await db["ai_consultations"].find_one({"email": current_user_email, "id": plan_id})
+    if not doc:
+        raise HTTPException(404, "Order plan not found")
+
+    current_status = doc.get("status", "PENDING")
+    if current_status != "PENDING":
+        raise HTTPException(400, f"Không thể phân tích lại lệnh có trạng thái {current_status}. Chỉ cho phép lệnh CHỜ ENTRY.")
+
+    sym = doc.get("symbol", "BTCUSDT")
+    interval = doc.get("interval", "15m")
+    mode = doc.get("mode", "SCALP")
+
+    try:
+        from binance_api import get_mtf_klines, get_historical_klines
+        mtf_klines = await get_mtf_klines(sym, ['15m', '1h', '4h', '1d', '1w'], limit=100)
+        candles = mtf_klines.get(interval)
+        if not candles:
+            candles = await get_historical_klines(sym, interval, limit=100)
+        if hasattr(candles, 'tolist'):
+            candles = candles.tolist()
+
+        current_price = float(candles[-1][4])
+
+        from agents import TechnicalAgent, SentimentAgent, TraderAgent
+        try:
+            from kronos_onnx import ModelEnsemble
+            kronos = ModelEnsemble()
+            kronos_pred = kronos.predict(candles, model_type="lstm")
+        except Exception:
+            kronos_pred = {"trend": "UP", "confidence": 80}
+
+        tech_agent = TechnicalAgent()
+        tech_analysis = await tech_agent.analyze_mtf(kronos_pred, mtf_klines, interval)
+
+        sent_agent = SentimentAgent()
+        sentiment_analysis = await sent_agent.analyze(sym)
+
+        trader_agent = TraderAgent()
+        new_plan = await trader_agent.consult(
+            symbol=sym,
+            interval=interval,
+            mode=mode,
+            current_price=current_price,
+            candles=candles,
+            kronos_prediction=kronos_pred,
+            tech_analysis=tech_analysis,
+            sentiment_analysis=sentiment_analysis,
+        )
+
+        update_fields = {
+            "entryZone": new_plan.get("entryZone"),
+            "stopLoss": new_plan.get("stopLoss"),
+            "takeProfit": new_plan.get("takeProfit"),
+            "confidence": new_plan.get("confidence"),
+            "riskRewardRatio": new_plan.get("riskRewardRatio"),
+            "analysisSummary": new_plan.get("analysisSummary"),
+            "reanalyzedAt": datetime.now(timezone.utc),
+        }
+
+        await db["ai_consultations"].update_one(
+            {"email": current_user_email, "id": plan_id},
+            {"$set": update_fields}
+        )
+
+        updated_doc = {**doc, **update_fields}
+        updated_doc.pop("_id", None)
+        return updated_doc
+    except Exception as e:
+        logger.error(f"[REANALYZE] Error for {sym}: {e}")
+        raise HTTPException(500, f"Re-analysis failed: {str(e)}")
 
 

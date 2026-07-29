@@ -266,6 +266,52 @@ class TraderAgent:
         }
 
 
+class StrategyLearnerAgent:
+    async def analyze_outcome(self, plan: dict, final_status: str) -> dict:
+        """Tự động phân tích lý do Thắng/Thua và rút ra bài học chiến lược tự học cho AI."""
+        sym = plan.get("symbol", "BTCUSDT")
+        inv = plan.get("interval", "15m")
+        rec = plan.get("recommendation", "LONG")
+        entry = plan.get("entryZone", {}).get("idealEntry", 0)
+        sl = plan.get("stopLoss", {}).get("price", 0)
+        tp1 = plan.get("takeProfit", [{}])[0].get("price", 0)
+
+        sys_prompt = (
+            "Bạn là AI Strategy Self-Learning Engine (Hệ thống AI Tự học Chiến lược Giao dịch). "
+            f"Vị thế vừa kết thúc: {rec} {sym} (Khung: {inv}). "
+            f"Kết quả thực tế: {final_status} (Entry: ${entry}, SL: ${sl}, TP1: ${tp1}).\n"
+            "Hãy thực hiện Phân tích Rút kinh nghiệm (Post-Mortem Analysis) và tự rút ra Bài học Chiến lược (Self-Learned Lesson) cho các lệnh tương lai.\n"
+            "Trả về ĐÚNG MỘT OBJECT JSON duy nhất theo định dạng:\n"
+            "{\n"
+            '  "outcomeSummary": "Nguyên nhân kết quả Thắng/Thua bằng Tiếng Việt ngắn gọn",\n'
+            '  "keyFactors": "Các yếu tố kỹ thuật/nến quyết định bằng Tiếng Việt",\n'
+            '  "learnedLesson": "Bài học chiến lược AI tự điều chỉnh cho các vị thế sau bằng Tiếng Việt"\n'
+            "}"
+        )
+
+        user_prompt = f"Phân tích kết quả lệnh {rec} {sym} với trạng thái {final_status}."
+        response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="text/plain")
+
+        try:
+            clean_text = response_text.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            if clean_text.startswith("```"):
+                clean_text = clean_text[3:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
+
+            return json.loads(clean_text.strip())
+        except Exception as e:
+            agent_logger.warning(f"StrategyLearnerAgent parse error: {e}")
+            is_win = "WIN" in final_status or "TP1" in final_status
+            return {
+                "outcomeSummary": f"Lệnh đã kết thúc với kết quả {'Thắng' if is_win else 'Cắt lỗ (Thua)'}.",
+                "keyFactors": "Giá phản ứng đúng vùng cản hỗ trợ/kháng cự chủ đạo." if is_win else "Giá quét vượt quá khoảng ATR biến động ngắn hạn.",
+                "learnedLesson": "Tự động điều chỉnh khoảng cách SL theo biến động ATR thực tế của thị trường."
+            }
+
+
 async def send_discord_alert(webhook_url: str, message: str):
     if not webhook_url:
         return

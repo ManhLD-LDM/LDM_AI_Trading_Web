@@ -1,11 +1,12 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
-import { AIConsultPlan } from '@/store/useStore';
+import { useTradingStore, AIConsultPlan } from '@/store/useStore';
 import { getStatusBadge } from './Sidebar';
+import { apiPost } from '@/lib/api';
 import { createChart, ColorType, IChartApi, ISeriesApi, UTCTimestamp, CandlestickSeries } from 'lightweight-charts';
 import {
   X, CheckCircle2, AlertTriangle, ShieldCheck, TrendingUp, TrendingDown,
-  Clock, ArrowRight, LineChart, Sparkles, Activity, Target, RefreshCw, ZoomIn
+  Clock, ArrowRight, LineChart, Sparkles, Activity, Target, RefreshCw, ZoomIn, GraduationCap, RotateCw, AlertOctagon, Trophy
 } from 'lucide-react';
 
 interface AIOrderDetailsModalProps {
@@ -14,7 +15,7 @@ interface AIOrderDetailsModalProps {
   onClose: () => void;
 }
 
-// Official TradingView Lightweight Charts Interactive Snapshot Component (100 candles, 15m, Zoomable)
+// Official TradingView Lightweight Charts Interactive Snapshot Component
 function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
   const chartContainerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -43,7 +44,7 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
         horzLines: { color: '#1e293b' },
       },
       crosshair: {
-        mode: 1, // Magnet crosshair
+        mode: 1,
       },
       rightPriceScale: {
         borderColor: '#1e293b',
@@ -206,10 +207,32 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
 }
 
 export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDetailsModalProps) {
+  const { token, setAiConsultPlan } = useTradingStore();
+  const [isReanalyzing, setIsReanalyzing] = useState(false);
+  const [reanalyzeMsg, setReanalyzeMsg] = useState('');
+
   if (!isOpen || !plan) return null;
 
   const isLong = plan.recommendation === 'LONG';
   const isWait = plan.recommendation === 'WAIT';
+  const isPending = !plan.status || plan.status === 'PENDING';
+
+  const handleReanalyze = async () => {
+    if (!token || !plan.id || !isPending) return;
+    setIsReanalyzing(true);
+    setReanalyzeMsg('');
+    try {
+      const updatedPlan = await apiPost<AIConsultPlan>('/api/live/ai-consult/reanalyze', { id: plan.id }, token);
+      if (updatedPlan) {
+        setAiConsultPlan(updatedPlan);
+        setReanalyzeMsg('✓ Đã phân tích lại vị thế thành công!');
+      }
+    } catch (err: any) {
+      setReanalyzeMsg(err.message || 'Lỗi khi phân tích lại');
+    } finally {
+      setIsReanalyzing(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-md z-50 flex items-center justify-center p-4 font-sans text-zinc-100 select-none">
@@ -234,13 +257,39 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors cursor-pointer"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-2">
+            {/* Re-Analyze Button for PENDING orders ONLY */}
+            {isPending ? (
+              <button
+                onClick={handleReanalyze}
+                disabled={isReanalyzing}
+                className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-bold px-3 py-1.5 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-sm"
+                title="Phân tích lại mốc Entry/SL/TP dựa trên nến mới nhất"
+              >
+                <RotateCw size={13} className={isReanalyzing ? 'animate-spin' : ''} />
+                <span>{isReanalyzing ? 'Đang phân tích...' : 'Phân tích lại'}</span>
+              </button>
+            ) : (
+              <span className="text-[10px] font-mono text-zinc-500 bg-zinc-950 px-2 py-1 rounded border border-zinc-800">
+                Đã chạy/kết thúc (Không phân tích lại)
+              </span>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
+
+        {reanalyzeMsg && (
+          <div className="px-4 py-2 bg-amber-500/10 text-amber-300 text-xs font-mono border-b border-amber-500/20 flex items-center justify-between">
+            <span>{reanalyzeMsg}</span>
+            <button onClick={() => setReanalyzeMsg('')} className="text-zinc-400 hover:text-zinc-100">✕</button>
+          </div>
+        )}
 
         {/* Modal Body */}
         <div className="p-4 md:p-6 overflow-y-auto space-y-5 flex-1 custom-scrollbar">
@@ -265,7 +314,7 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
             </div>
           </div>
 
-          {/* Rationale & Authentic Proof */}
+          {/* Rationale & Technical Proof */}
           <div className="bg-zinc-950 p-4 rounded-xl border border-zinc-800 space-y-3">
             <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
               <Sparkles size={14} /> Tiến trình & Lý do Kỹ thuật của AI
@@ -308,6 +357,38 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
               )}
             </div>
           </div>
+
+          {/* AI Post-Mortem Strategy Learning Section (After Trade Finishes) */}
+          {plan.postMortemAnalysis && (
+            <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-4 rounded-xl border border-teal-500/40 space-y-3 font-sans shadow-lg">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-teal-400 flex items-center gap-2">
+                <GraduationCap size={16} /> Phân tích Rút kinh nghiệm & Bài học Tự học của AI
+              </h4>
+
+              <div className="space-y-2 text-xs text-zinc-300">
+                {plan.postMortemAnalysis.outcomeSummary && (
+                  <div className="flex items-start gap-2 bg-zinc-900/80 p-2.5 rounded-lg border border-zinc-800">
+                    <span className="text-teal-400 font-bold shrink-0">📌 Đánh giá:</span>
+                    <p>{plan.postMortemAnalysis.outcomeSummary}</p>
+                  </div>
+                )}
+
+                {plan.postMortemAnalysis.keyFactors && (
+                  <div className="flex items-start gap-2 bg-zinc-900/80 p-2.5 rounded-lg border border-zinc-800">
+                    <span className="text-amber-400 font-bold shrink-0">⚡ Yếu tố nến:</span>
+                    <p>{plan.postMortemAnalysis.keyFactors}</p>
+                  </div>
+                )}
+
+                {plan.postMortemAnalysis.learnedLesson && (
+                  <div className="flex items-start gap-2 bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/30 text-emerald-300">
+                    <Sparkles size={14} className="shrink-0 mt-0.5" />
+                    <p><strong className="text-emerald-400">Bài học tự học AI:</strong> {plan.postMortemAnalysis.learnedLesson}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Interactive TradingView Setup Chart */}
           <RealLightweightSetupChart plan={plan} />

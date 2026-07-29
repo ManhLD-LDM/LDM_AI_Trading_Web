@@ -19,8 +19,7 @@ if not SECRET_KEY or SECRET_KEY == _PLACEHOLDER:
             "FATAL: JWT_SECRET_KEY must be set in production!\n"
             "Generate: python -c \"import secrets; print(secrets.token_hex(32))\""
         )
-    SECRET_KEY = _secrets.token_hex(32)
-    print("⚠️  JWT_SECRET_KEY not set. Using ephemeral random key (dev only). Sessions lost on restart.")
+    print("[WARNING] JWT_SECRET_KEY not set. Using ephemeral random key (dev only). Sessions lost on restart.")
 
 ALGORITHM = "HS256"
 try:

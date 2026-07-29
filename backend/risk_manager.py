@@ -161,12 +161,10 @@ class RiskManager:
         logger.info(f"Daily risk state reset. Starting balance: ${current_balance:.2f}")
 
 
-# ─── Shared in-memory state (per-process, reset on restart) ──────────────────
-# For production, persist TradeState in MongoDB.
+# ─── Shared in-memory & database-backed risk state ───────────────────
 _default_config = RiskConfig()
 default_risk_manager = RiskManager(_default_config)
 
-# In-memory user risk states (email -> TradeState)
 _user_states: dict[str, TradeState] = {}
 
 
@@ -174,3 +172,50 @@ def get_user_risk_state(email: str) -> TradeState:
     if email not in _user_states:
         _user_states[email] = TradeState()
     return _user_states[email]
+
+
+async def load_user_risk_state_db(email: str) -> TradeState:
+    """Loads user risk state from MongoDB if connected, otherwise returns in-memory state."""
+    from database import is_connected, get_database
+    state = get_user_risk_state(email)
+
+    if is_connected():
+        try:
+            db = get_database()
+            doc = await db["risk_states"].find_one({"email": email})
+            if doc:
+                state.peak_equity = float(doc.get("peak_equity", state.peak_equity))
+                state.consecutive_losses = int(doc.get("consecutive_losses", state.consecutive_losses))
+                state.daily_start_balance = float(doc.get("daily_start_balance", state.daily_start_balance))
+                state.daily_pnl = float(doc.get("daily_pnl", state.daily_pnl))
+                state.trading_halted = bool(doc.get("trading_halted", state.trading_halted))
+                state.halt_reason = str(doc.get("halt_reason", state.halt_reason))
+        except Exception as e:
+            logger.warning(f"Error loading risk state from DB for {email}: {e}")
+
+    return state
+
+
+async def save_user_risk_state_db(email: str, state: TradeState) -> None:
+    """Saves user risk state into MongoDB if connected."""
+    from database import is_connected, get_database
+
+    if is_connected():
+        try:
+            db = get_database()
+            await db["risk_states"].update_one(
+                {"email": email},
+                {"$set": {
+                    "email": email,
+                    "peak_equity": state.peak_equity,
+                    "consecutive_losses": state.consecutive_losses,
+                    "daily_start_balance": state.daily_start_balance,
+                    "daily_pnl": state.daily_pnl,
+                    "trading_halted": state.trading_halted,
+                    "halt_reason": state.halt_reason,
+                }},
+                upsert=True
+            )
+        except Exception as e:
+            logger.warning(f"Error saving risk state to DB for {email}: {e}")
+

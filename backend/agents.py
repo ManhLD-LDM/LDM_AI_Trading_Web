@@ -19,6 +19,8 @@ if GEMINI_API_KEY:
 FALLBACK_MODEL = "gemini-2.0-flash"  # Khi Gemma 500, dùng Gemini làm fallback
 
 
+from signal_scorer import technical_scorer
+
 def calculate_atr(candles, period: int = 14) -> float:
     """Tính chỉ số ATR (Average True Range) từ danh sách nến [[ts, open, high, low, close, vol], ...]"""
     if hasattr(candles, 'tolist'):
@@ -141,11 +143,16 @@ class TraderAgent:
         kronos_prediction: dict,
         tech_analysis: str,
         sentiment_analysis: str,
+        mtf_klines: dict | None = None,
     ) -> dict:
         """Lập Kế hoạch Cố vấn Trading Đa Khung Thời Gian (Multi-Timeframe AI Trading Blueprint)."""
         atr = calculate_atr(candles, 14)
         swing_low, swing_high = calculate_swing_levels(candles, 50)
         mode_upper = mode.upper() if mode else "SCALP"
+
+        # Deterministic Technical Signal Evaluation
+        mtf_data_eval = mtf_klines or {interval: candles}
+        tech_score = technical_scorer.evaluate(mtf_data_eval, interval, kronos_prediction)
 
         mode_rules = (
             "CHẾ ĐỘ GIAO DỊCH: SCALP (LƯỚT SÓNG NẮNG HẠN TRONG NGÀY)\n"
@@ -162,13 +169,15 @@ class TraderAgent:
         sys_prompt = (
             f"Bạn là Master AI Trading Consultant (Cố vấn Giao dịch Chuyên nghiệp Đa Khung Thời Gian). "
             f"Tài sản: {symbol} | Khung thời gian người dùng đang xem: {interval} | Chế độ: {mode_upper}. "
-            f"Giá hiện tại: {current_price}. ATR(14) = {atr:.2f}. Swing Low 50 nến = {swing_low:.2f}, Swing High = {swing_high:.2f}.\n\n"
+            f"Giá hiện tại: {current_price}. ATR(14) = {atr:.2f}. Swing Low 50 nến = {swing_low:.2f}, Swing High = {swing_high:.2f}.\n"
+            f"ĐIỂM KỸ THUẬT CỨNG (DETERMINISTIC SCORE): {tech_score['total_score']} / 100 -> Tín hiệu khuyến nghị: {tech_score['signal']} (Confidence: {tech_score['confidence']}%).\n"
+            f"Lý do kỹ thuật: {', '.join(tech_score['reasons'])}\n\n"
             f"{mode_rules}\n\n"
             "Dựa trên Phân tích Đa Khung (15m, 1h, 4h, 1D, 1W) và Tin tức, hãy ra quyết định giao dịch cho KHUNG HIỆN TẠI mà người dùng đang xem. "
             "Trả về ĐÚNG MỘT OBJECT JSON duy nhất không chứa bất kỳ văn bản nào khác ngoài JSON theo định dạng:\n"
             "{\n"
-            '  "recommendation": "LONG" | "SHORT" | "WAIT",\n'
-            '  "confidence": 85,\n'
+            '  "recommendation": "' + tech_score['signal'] + '" | "LONG" | "SHORT" | "WAIT",\n'
+            '  "confidence": ' + str(tech_score['confidence']) + ',\n'
             '  "mode": "' + mode_upper + '",\n'
             '  "entryZone": {"minPrice": float, "maxPrice": float, "idealEntry": float},\n'
             '  "stopLoss": {"price": float, "percentage": float, "rationale": "Lý do đặt SL dựa trên Hợp lưu Đa khung & Swing/ATR bằng Tiếng Việt"},\n'
@@ -222,9 +231,9 @@ class TraderAgent:
         except Exception as e:
             agent_logger.warning(f"TraderAgent consult JSON parse failed: {e}. Generating math-anchored fallback plan.")
 
-        # Fallback Plan mathematically calculated using ATR and Swing levels
-        is_long = kronos_prediction.get("trend") != "DOWN"
-        rec = "LONG" if is_long else "SHORT"
+        # Fallback Plan mathematically calculated using ATR, Swing levels, and Technical Scorer
+        rec = tech_score["signal"]
+        is_long = rec == "LONG"
         
         safe_dist = max(2.5 * atr, current_price * (0.015 if mode_upper == "SWING" else 0.01))
         sl_price = round(min(current_price - safe_dist, swing_low), 2) if is_long else round(max(current_price + safe_dist, swing_high), 2)
@@ -239,7 +248,7 @@ class TraderAgent:
             "interval": interval,
             "mode": mode_upper,
             "recommendation": rec,
-            "confidence": kronos_prediction.get("confidence", 80),
+            "confidence": tech_score["confidence"],
             "entryZone": {
                 "minPrice": round(current_price * (0.998 if is_long else 1.001), 2),
                 "maxPrice": round(current_price * (1.002 if is_long else 1.003), 2),
@@ -259,7 +268,7 @@ class TraderAgent:
             "recommendedRiskPct": 1.5,
             "analysisSummary": {
                 "candlestickPattern": f"Phân tích Hợp lưu MTF (15m/1h/4h/1D) cho {symbol}.",
-                "technicalConfluence": f"Dự báo Kronos Quantum: {kronos_prediction.get('trend')} ({kronos_prediction.get('confidence')}%)",
+                "technicalConfluence": f"Chấm điểm kỹ thuật cứng: {tech_score['total_score']}/100. Reasons: {', '.join(tech_score['reasons'])}",
                 "newsSentiment": sentiment_analysis[:150] if sentiment_analysis else "Tâm lý tin tức ở mức trung tính.",
                 "keyWarning": f"Chế độ {mode_upper}: Kiểm tra mốc SL trước khi vào lệnh.",
             },

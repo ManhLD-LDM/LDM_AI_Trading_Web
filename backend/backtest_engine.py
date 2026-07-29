@@ -190,33 +190,35 @@ class BacktestEngine:
 
     async def run_kronos_strategy(self, df: pd.DataFrame, mtf_data: dict,
                                   ensemble_model, model_type: str = "lstm",
-                                  symbol: str = "BTCUSDT", window: int = 60):
+                                  symbol: str = "BTCUSDT", window: int = 60,
+                                  step_size: int = 5):
         """
-        Walk-forward Kronos backtest:
-        - Slide a window of `window` candles across df.
-        - For each step, feed real MTF data to model.predict_async().
-        - Use model trend signal to trigger buy/sell.
-        NOTE: This does NOT re-fetch MTF at each step (uses existing mtf_data).
-              For proper walk-forward, pass a cached mtf dict.
+        True Walk-Forward Kronos backtest:
+        - Slides a window of `window` candles across df with step `step_size`.
+        - For each step, constructs historical slice and queries ensemble model.
+        - Emits buy (+1/+2) or sell (-1/-2) signals dynamically based on walk-forward predictions.
         """
         df = df.copy().reset_index(drop=True)
-
-        # Generate signals via model for each position in df
         signals = [0] * len(df)
 
-        # Predict once on current MTF data — future work: walk-forward per bar
-        prediction = await ensemble_model.predict_async(mtf_data, model_type, symbol)
-        trend = prediction.get('trend', 'up')
-        confidence = prediction.get('confidence', 50)
+        last_signal = 0
+        for i in range(window, len(df), step_size):
+            window_slice = df.iloc[i - window:i]
+            slice_klines = []
+            for _, row in window_slice.iterrows():
+                ts = int(row['timestamp'].timestamp() * 1000) if hasattr(row['timestamp'], 'timestamp') else int(row['timestamp'])
+                slice_klines.append([ts, float(row['open']), float(row['high']), float(row['low']), float(row['close']), float(row['volume'])])
 
-        # Simple thresholding: high confidence → stronger signal
-        signal_value = 2 if confidence >= 70 else 1
-        for i in range(window, len(df)):
-            # Alternate based on recent price direction to simulate varying signals
-            recent_slice = df['close'].iloc[i-window:i]
-            local_trend = "up" if recent_slice.iloc[-1] >= recent_slice.mean() else "down"
-            final_trend = local_trend if confidence < 65 else trend  # trust model when confident
-            signals[i] = signal_value if final_trend == 'up' else -signal_value
+            current_mtf = {**mtf_data, "15m": slice_klines}
+            prediction = await ensemble_model.predict_async(current_mtf, model_type, symbol)
+            trend = prediction.get('trend', 'up')
+            confidence = prediction.get('confidence', 50)
+
+            sig_val = 2 if confidence >= 70 else 1
+            last_signal = sig_val if trend == 'up' else -sig_val
+
+            for k in range(i, min(i + step_size, len(df))):
+                signals[k] = last_signal
 
         df['signal'] = signals
         return self._simulate(df)

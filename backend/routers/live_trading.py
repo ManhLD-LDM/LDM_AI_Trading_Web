@@ -113,8 +113,9 @@ async def live_buy(req: LiveTradeRequest, current_user_email: str = Depends(get_
         current_price = await executor.get_current_price(req.symbol)
         estimated_qty = req.usdt_amount / current_price if current_price > 0 else 0
 
-        # Load per-user risk state (in-memory session tracking)
-        state = get_user_risk_state(current_user_email)
+        # Load per-user risk state from DB
+        from risk_manager import load_user_risk_state_db, save_user_risk_state_db
+        state = await load_user_risk_state_db(current_user_email)
 
         result_risk = default_risk_manager.check(
             symbol=req.symbol,
@@ -128,6 +129,8 @@ async def live_buy(req: LiveTradeRequest, current_user_email: str = Depends(get_
         if not result_risk.allowed:
             logger.warning(f"[LIVE] Trade BLOCKED for {current_user_email}: {result_risk.reason}")
             raise HTTPException(400, f"Risk Manager blocked trade: {result_risk.reason}")
+
+        await save_user_risk_state_db(current_user_email, state)
 
     # ── Execute order ─────────────────────────────────────────────────────
     result = await executor.place_market_buy_with_oco(

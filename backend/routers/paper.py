@@ -75,8 +75,8 @@ async def execute_paper_trade(req: PaperTradeRequest, current_user_email: str = 
     fee = req.price * req.quantity * TAKER_FEE
     pnl: float | None = None
 
-    # ── Risk check before execution ───────────────────────────────────────────
-    risk_state = get_user_risk_state(current_user_email)
+    from risk_manager import load_user_risk_state_db, save_user_risk_state_db
+    risk_state = await load_user_risk_state_db(current_user_email)
     risk_result = default_risk_manager.check(
         symbol=req.symbol,
         action=req.action,
@@ -123,8 +123,9 @@ async def execute_paper_trade(req: PaperTradeRequest, current_user_email: str = 
         {"$set": {"paper_balance": round(balance, 4), "paper_positions": positions}}
     )
 
-    # Update risk state after trade
+    # Update risk state after trade & persist to DB
     default_risk_manager.update_after_trade(risk_state, pnl, round(balance, 4), positions)
+    await save_user_risk_state_db(current_user_email, risk_state)
 
     trade_record = {
         "email": current_user_email,

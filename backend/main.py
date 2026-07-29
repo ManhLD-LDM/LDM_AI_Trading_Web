@@ -429,22 +429,36 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
         recent_candles = history_data[-50:].tolist() if hasattr(history_data, 'tolist') else list(history_data)[-50:]
         current_price = float(history_data[-1][4])
 
-        tech_task = asyncio.create_task(tech_agent.analyze(kronos_prediction, recent_candles, interval))
+        tech_task = asyncio.create_task(tech_agent.analyze_mtf(kronos_prediction, mtf_data, interval))
         sent_task = asyncio.create_task(sentiment_agent.analyze(symbol))
 
         tech_analysis, sent_analysis = await asyncio.gather(tech_task, sent_task)
 
-        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Tech Agent", "thought": f"[{symbol}] Technical analysis completed."}))
+        await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Tech Agent", "thought": f"[{symbol}] Multi-Timeframe Technical analysis completed."}))
         await manager.broadcast(json.dumps({"type": "ai_log", "agent_name": "Sentiment Agent", "thought": f"[{symbol}] Sentiment analysis completed."}))
 
-        # 4. Final Decision
-        decision = await trader_agent.decide(tech_analysis, sent_analysis, interval)
+        # 4. Final Decision via Trader Agent Consultation
+        candles_list = history_data.tolist() if hasattr(history_data, 'tolist') else list(history_data)
+        consultation = await trader_agent.consult(
+            symbol=symbol,
+            interval=interval,
+            mode="scalp",
+            current_price=current_price,
+            candles=candles_list,
+            kronos_prediction=kronos_prediction,
+            tech_analysis=tech_analysis,
+            sentiment_analysis=sent_analysis,
+        )
+
+        action = consultation.get("recommendation", "WAIT")
+        confidence = consultation.get("confidence", 50)
+        reason = consultation.get("analysisSummary", {}).get("technicalConfluence", "AI analysis completed.")
 
         await manager.broadcast(json.dumps({
             "type": "ai_log",
             "agent_name": "Trader Agent",
-            "thought": f"[{symbol}] Decision: {decision.get('action')}. {decision.get('reason')}",
-            "action": decision.get('action'),
+            "thought": f"[{symbol}] Recommendation: {action} (Confidence: {confidence}%). {reason}",
+            "action": action,
             "price": current_price,
             "timestamp": int(history_data[-1][0] / 1000)
         }))
@@ -452,10 +466,10 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
         # Fire alert for actionable signals
         await alert_manager.send_signal_alert(
             symbol=symbol,
-            action=decision.get('action', 'HOLD'),
+            action=action,
             price=current_price,
-            confidence=float(decision.get('confidence', 50)),
-            reason=str(decision.get('reason', ''))[:300],
+            confidence=float(confidence),
+            reason=str(reason)[:300],
             model_type=model_type.upper(),
         )
 
@@ -464,10 +478,11 @@ async def run_analysis_for_symbol(symbol: str, interval: str, model_type: str = 
             collection = get_database()["trade_signals"]
             await collection.insert_one({
                 "symbol": symbol,
-                "action": decision.get('action'),
-                "confidence": decision.get('confidence'),
+                "action": action,
+                "confidence": confidence,
                 "price": current_price,
-                "reason": decision.get('reason'),
+                "reason": reason,
+                "consultation_plan": consultation,
                 "createdAt": datetime.now(timezone.utc)
             })
     except Exception as e:

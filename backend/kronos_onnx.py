@@ -95,55 +95,13 @@ def _df_from_klines(klines: list) -> pd.DataFrame:
     return df
 
 
-def _build_mtf_features(mtf_data: dict) -> np.ndarray:
+from shared_features import build_mtf_feature_matrix
+
+def _build_mtf_features(mtf_data: dict, scaler=None) -> np.ndarray:
     """
-    Build (SEQ_LEN, 65) feature matrix from MTF kline data.
-    Each timeframe contributes FEATURES_PER_TF columns.
-    If total < 65, pad with zeros to reach expected model input shape.
+    Build (SEQ_LEN, 65) feature matrix from MTF kline data using shared feature module.
     """
-    tf_features = []
-
-    for tf in MTF_INTERVALS:
-        klines = mtf_data.get(tf, [])
-        if len(klines) < 30:
-            # Not enough data — use zeros for this timeframe
-            tf_features.append(np.zeros((SEQ_LEN, FEATURES_PER_TF), dtype=np.float32))
-            continue
-
-        df = _df_from_klines(klines)
-        ind_df = _compute_indicators(df)
-
-        # Reindex to SEQ_LEN rows
-        arr = ind_df.values.astype(np.float32)
-        if len(arr) < SEQ_LEN:
-            pad = np.tile(arr[:1], (SEQ_LEN - len(arr), 1))
-            arr = np.vstack([pad, arr])
-        else:
-            arr = arr[-SEQ_LEN:]
-
-        # Normalise each column to [0,1]
-        mins = arr.min(axis=0)
-        maxs = arr.max(axis=0)
-        arr = (arr - mins) / (maxs - mins + 1e-8)
-
-        # Keep exactly FEATURES_PER_TF columns
-        if arr.shape[1] >= FEATURES_PER_TF:
-            arr = arr[:, :FEATURES_PER_TF]
-        else:
-            pad_cols = np.zeros((SEQ_LEN, FEATURES_PER_TF - arr.shape[1]), dtype=np.float32)
-            arr = np.hstack([arr, pad_cols])
-
-        tf_features.append(arr)
-
-    # Stack all timeframes side-by-side → (SEQ_LEN, N_TIMEFRAMES × FEATURES_PER_TF)
-    combined = np.hstack(tf_features)  # (60, 45)
-
-    # Pad to 65 features (model's expected input)
-    if combined.shape[1] < 65:
-        pad_cols = np.zeros((SEQ_LEN, 65 - combined.shape[1]), dtype=np.float32)
-        combined = np.hstack([combined, pad_cols])
-
-    return combined.astype(np.float32)
+    return build_mtf_feature_matrix(mtf_data, scaler=scaler)
 
 
 class ModelEnsemble:
@@ -157,6 +115,27 @@ class ModelEnsemble:
     def __init__(self, models_dir: str = "."):
         self.models_dir = models_dir
         self.models = {}
+        self.scalers = {}
+
+    def _get_or_load_scaler(self, symbol: str, interval: str = "15m"):
+        key = f"{symbol}_{interval}"
+        if key in self.scalers:
+            return self.scalers[key]
+
+        scaler_path = os.path.join(self.models_dir, "trainers", f"scaler_MTF_{symbol}_{interval}.gz")
+        if not os.path.exists(scaler_path):
+            scaler_path = os.path.join(self.models_dir, "trainers", f"scaler_MTF_{symbol}_15m.gz")
+
+        if os.path.exists(scaler_path) and joblib is not None:
+            try:
+                scaler = joblib.load(scaler_path)
+                self.scalers[key] = scaler
+                model_logger.info(f"Loaded scaler for {symbol} from {scaler_path}")
+                return scaler
+            except Exception as e:
+                model_logger.warning(f"Failed to load scaler {scaler_path}: {e}")
+
+        return None
 
     def _get_or_load_model(self, model_type: str, asset_class: str):
         key = f"{model_type}_{asset_class}"
@@ -229,8 +208,11 @@ class ModelEnsemble:
             }
 
         try:
+            # Load trained scaler for symbol
+            scaler = self._get_or_load_scaler(symbol, interval)
+
             # Build feature matrix in thread so we don't block event loop
-            full_features = await asyncio.to_thread(_build_mtf_features, mtf_data)
+            full_features = await asyncio.to_thread(_build_mtf_features, mtf_data, scaler)
 
             if model_type == "xgboost":
                 # XGBoost: try .json first, fall back to ONNX session

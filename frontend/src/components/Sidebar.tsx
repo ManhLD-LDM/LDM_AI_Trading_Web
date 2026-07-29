@@ -102,7 +102,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         <div className="flex items-center justify-between mb-5 pb-4 border-b border-zinc-800">
           <h2 className="text-xs font-bold uppercase tracking-widest text-emerald-400 flex items-center gap-2">
             <History size={15} />
-            <span>Lịch sử Lệnh AI Cố vấn</span>
+            <span>Lịch sử Tín hiệu AI</span>
             <span className="text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
               {allPlans.length}
             </span>
@@ -110,7 +110,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           <div className="flex items-center gap-1">
             <button 
               onClick={fetchHistoryFromDb}
-              title="Làm mới lịch sử"
+              title="Làm mới"
               className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all cursor-pointer"
             >
               <RefreshCw size={14} className={isLoadingHistory ? 'animate-spin' : ''} />
@@ -129,8 +129,8 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
           {allPlans.length === 0 ? (
             <div className="text-xs text-zinc-500 italic text-center py-10 space-y-2">
               <Sparkles size={24} className="mx-auto text-zinc-600 animate-pulse" />
-              <p>Chưa có lịch sử lệnh AI.</p>
-              <p className="text-[11px] text-zinc-600">Bấm "Yêu cầu AI Cố vấn" để tạo lệnh đầu tiên.</p>
+              <p>Chưa có lịch sử tín hiệu.</p>
+              <p className="text-[11px] text-zinc-600">Tạo lệnh mới bằng nút "Yêu cầu AI".</p>
             </div>
           ) : (
             allPlans.map((plan, idx) => {
@@ -160,7 +160,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
 
                   <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
                     <span>Entry: <strong className="text-blue-400">${plan.entryZone.idealEntry.toLocaleString()}</strong></span>
-                    <span className="text-emerald-400 font-bold">{plan.confidence}% Tin cậy</span>
+                    <span className="text-emerald-400 font-bold">{plan.confidence}%</span>
                   </div>
 
                   <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-[10px]">
@@ -179,7 +179,7 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         {/* Footer info */}
         <div className="mt-4 pt-4 border-t border-zinc-800 font-mono text-xs space-y-2">
           <div className="flex justify-between items-center text-xs">
-            <span className="text-zinc-500">Cặp hiện tại:</span>
+            <span className="text-zinc-500">Cặp đang xem:</span>
             <span className="text-zinc-200 font-bold">{pair}</span>
           </div>
           <div className="flex justify-between items-center text-xs">
@@ -189,7 +189,6 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
         </div>
       </div>
 
-      {/* AI Order Details Modal */}
       <AIOrderDetailsModal
         plan={selectedPlan}
         isOpen={isModalOpen}

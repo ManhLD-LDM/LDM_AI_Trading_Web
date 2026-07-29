@@ -42,10 +42,9 @@ export default function AIConsultantCard() {
     setErrorMsg('');
     try {
       if (!token) {
-        setErrorMsg('Vui lòng Đăng nhập để sử dụng AI Cố vấn Realtime. (Đang dùng dữ liệu Demo)');
+        setErrorMsg('Đăng nhập để dùng AI Realtime (Hoặc xem dữ liệu Demo)');
       }
 
-      // Call backend API for AI Consultation with MTF and mode if token exists
       let res: any = null;
       if (token) {
         res = await apiGet(`/api/live/ai-consult?symbol=${pair}&interval=${interval}&mode=${selectedMode}`, token);
@@ -54,7 +53,6 @@ export default function AIConsultantCard() {
       if (res && res.recommendation) {
         setAiConsultPlan(res as AIConsultPlan);
       } else {
-        // Mock fallback blueprint for instant UI feedback or guest mode
         const mockPrice = pair.startsWith('BTC') ? 95420 : pair.startsWith('ETH') ? 3420 : 2650;
         const isLong = Math.random() > 0.4;
         const mockPlan: AIConsultPlan = {
@@ -71,8 +69,8 @@ export default function AIConsultantCard() {
             price: Math.round(mockPrice * (isLong ? (selectedMode === 'swing' ? 0.98 : 0.99) : (selectedMode === 'swing' ? 1.02 : 1.01))),
             percentage: selectedMode === 'swing' ? 2.0 : 1.0,
             rationale: isLong 
-              ? `Hỗ trợ Swing Low Đa khung (15m/1h/4h) cho chế độ ${selectedMode.toUpperCase()}.` 
-              : `Kháng cự Swing High Đa khung (15m/1h/4h) cho chế độ ${selectedMode.toUpperCase()}.`,
+              ? `Hỗ trợ Swing Low Đa khung cho chế độ ${selectedMode.toUpperCase()}.` 
+              : `Kháng cự Swing High Đa khung cho chế độ ${selectedMode.toUpperCase()}.`,
           },
           takeProfit: [
             {
@@ -92,10 +90,10 @@ export default function AIConsultantCard() {
           suggestedLeverage: selectedMode === 'swing' ? '2x - 5x Isolated' : '5x - 10x Cross',
           recommendedRiskPct: 1.5,
           analysisSummary: {
-            candlestickPattern: `Hợp lưu xu hướng Đa khung thời gian (15m, 1h, 4h, 1D, 1W) cho chế độ ${selectedMode.toUpperCase()}.`,
-            technicalConfluence: 'Khung lớn (1D/4h) cùng chiều với lực tăng ngắn hạn (15m/1h).',
-            newsSentiment: 'CryptoPanic: Tin tức thị trường ủng hộ xu hướng.',
-            keyWarning: 'Chú ý đặt cảnh báo mốc Entry trước khi mở vị thế.',
+            candlestickPattern: `Hợp lưu nến Đa khung (15m - 1W) cho chế độ ${selectedMode.toUpperCase()}.`,
+            technicalConfluence: 'Khung lớn (1D/4h) cùng chiều với lực ngắn hạn.',
+            newsSentiment: 'CryptoPanic: Tin tức thị trường tích cực.',
+            keyWarning: 'Kiểm tra mốc SL trước khi vào vị thế.',
           },
         };
         setAiConsultPlan(mockPlan);
@@ -103,9 +101,9 @@ export default function AIConsultantCard() {
     } catch (err: any) {
       console.warn('AI Consult Auth/Fetch Warning:', err.message);
       if (err.message?.includes('credentials') || err.message?.includes('401')) {
-        setErrorMsg('Phiên đăng nhập đã hết hạn. Vui lòng Đăng nhập lại để kết nối AI Realtime.');
+        setErrorMsg('Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại.');
       } else {
-        setErrorMsg(err.message || 'Không thể tạo Kế hoạch Cố vấn AI.');
+        setErrorMsg(err.message || 'Không thể tạo tín hiệu AI.');
       }
     } finally {
       setIsAiConsultLoading(false);
@@ -118,14 +116,14 @@ export default function AIConsultantCard() {
         return (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-bold text-sm">
             <TrendingUp size={16} />
-            <span>Mở vị thế MUA (LONG)</span>
+            <span>MUA (LONG)</span>
           </div>
         );
       case 'SHORT':
         return (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/10 border border-rose-500/30 text-rose-400 font-bold text-sm">
             <TrendingDown size={16} />
-            <span>Mở vị thế BÁN (SHORT)</span>
+            <span>BÁN (SHORT)</span>
           </div>
         );
       default:
@@ -140,7 +138,7 @@ export default function AIConsultantCard() {
 
   return (
     <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-4 md:p-5 shadow-2xl backdrop-blur-md space-y-4 font-sans text-zinc-100 select-none">
-      {/* ── Card Header & Strategy Mode Switcher ─────────────────────────────── */}
+      {/* Header & Mode Switcher */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between border-b border-zinc-800/80 pb-3 gap-3">
         <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.15)] shrink-0">
@@ -148,18 +146,17 @@ export default function AIConsultantCard() {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-bold text-zinc-100">Cố vấn AI Trading Đa Khung</h2>
+              <h2 className="text-base font-bold text-zinc-100">Cố vấn AI Trading</h2>
               <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700">
                 {pair} • {interval}
               </span>
             </div>
-            <p className="text-xs text-zinc-400">Phân tích hợp lưu 15m, 1h, 4h, 1D, 1W cho khung thời gian xem hiện tại</p>
+            <p className="text-xs text-zinc-400">Đề xuất Entry, SL, TP & Quản trị rủi ro Đa khung</p>
           </div>
         </div>
 
         {/* Mode Switcher & Trigger Button */}
         <div className="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
-          {/* Mode Switcher Toggle */}
           <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs font-bold font-mono">
             <button
               onClick={() => setSelectedMode('scalp')}
@@ -193,7 +190,7 @@ export default function AIConsultantCard() {
             {isAiConsultLoading ? (
               <>
                 <RefreshCw size={14} className="animate-spin" />
-                <span>Đang phân tích Đa khung...</span>
+                <span>Đang phân tích...</span>
               </>
             ) : (
               <>
@@ -212,11 +209,10 @@ export default function AIConsultantCard() {
         </div>
       )}
 
-      {/* ── Active AI Consultation Blueprint Card ────────────────────────────── */}
+      {/* Active AI Plan */}
       {aiConsultPlan && (
         <div className="space-y-4 animate-in fade-in duration-300">
           
-          {/* Main Action Badge & Confidence Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between bg-zinc-950/60 p-3.5 rounded-xl border border-zinc-800 gap-3">
             <div className="flex items-center gap-3">
               {getRecommendationBadge(aiConsultPlan.recommendation)}
@@ -228,7 +224,7 @@ export default function AIConsultantCard() {
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-              <span className="text-xs font-medium text-zinc-400">Độ tin cậy AI:</span>
+              <span className="text-xs font-medium text-zinc-400">Độ tin cậy:</span>
               <div className="flex items-center gap-2">
                 <div className="w-24 bg-zinc-800 h-2 rounded-full overflow-hidden border border-zinc-700">
                   <div
@@ -241,10 +237,9 @@ export default function AIConsultantCard() {
             </div>
           </div>
 
-          {/* Blueprint Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             
-            {/* 1. Entry Zone */}
+            {/* Entry Zone */}
             <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
@@ -261,7 +256,7 @@ export default function AIConsultantCard() {
               </div>
             </div>
 
-            {/* 2. Stop Loss */}
+            {/* Stop Loss */}
             <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
@@ -279,7 +274,7 @@ export default function AIConsultantCard() {
               </p>
             </div>
 
-            {/* 3. Take Profit Targets */}
+            {/* Take Profit */}
             <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
@@ -300,7 +295,7 @@ export default function AIConsultantCard() {
             </div>
           </div>
 
-          {/* AI Analysis Reasoning Accordion */}
+          {/* Reasoning Accordion */}
           <div className="bg-zinc-950/40 rounded-xl border border-zinc-800 overflow-hidden">
             <button
               onClick={() => setIsDetailsOpen(!isDetailsOpen)}
@@ -308,7 +303,7 @@ export default function AIConsultantCard() {
             >
               <span className="flex items-center gap-2">
                 <LineChartIcon size={14} className="text-emerald-400" />
-                <span>Bằng chứng Phân tích Đa Khung Thời Gian & Tin tức</span>
+                <span>Lý do & Bằng chứng vào lệnh</span>
               </span>
               {isDetailsOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
             </button>
@@ -318,13 +313,13 @@ export default function AIConsultantCard() {
                 {aiConsultPlan.analysisSummary.candlestickPattern && (
                   <div className="flex items-start gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
-                    <p><strong className="text-zinc-200">Hợp lưu Đa Khung (15m/1h/4h/1D):</strong> {aiConsultPlan.analysisSummary.candlestickPattern}</p>
+                    <p><strong className="text-zinc-200">Hợp lưu Đa Khung:</strong> {aiConsultPlan.analysisSummary.candlestickPattern}</p>
                   </div>
                 )}
                 {aiConsultPlan.analysisSummary.technicalConfluence && (
                   <div className="flex items-start gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5 shrink-0" />
-                    <p><strong className="text-zinc-200">Hội tụ Chỉ số:</strong> {aiConsultPlan.analysisSummary.technicalConfluence}</p>
+                    <p><strong className="text-zinc-200">Chỉ số Kỹ thuật:</strong> {aiConsultPlan.analysisSummary.technicalConfluence}</p>
                   </div>
                 )}
                 {aiConsultPlan.analysisSummary.newsSentiment && (
@@ -343,22 +338,22 @@ export default function AIConsultantCard() {
             )}
           </div>
 
-          {/* ── Trader Approval & Execution Action Bar ─────────────────────────── */}
+          {/* Action Bar */}
           <div className="flex items-center justify-between p-3 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-2 text-xs font-mono text-emerald-400">
               <CheckCircle2 size={16} />
-              <span>Đã tự động vẽ mốc Entry, SL, TP1/TP2 lên biểu đồ!</span>
+              <span>Đã vẽ mốc Entry, SL, TP lên Chart</span>
             </div>
 
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
-                  alert(`Đã duyệt Kế hoạch ${aiConsultPlan.recommendation} cho ${aiConsultPlan.symbol}!\nVui lòng chọn tab Paper Trading hoặc Live Trade để xác nhận đặt lệnh.`);
+                  alert(`Đã chọn vị thế ${aiConsultPlan.recommendation} (${aiConsultPlan.symbol}). Chuyển tab Paper Trading hoặc Live Trade để đặt lệnh.`);
                 }}
                 className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.2)]"
               >
                 <ArrowRight size={14} />
-                <span>Duyệt & Đặt Lệnh</span>
+                <span>Áp dụng Lệnh</span>
               </button>
             </div>
           </div>

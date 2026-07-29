@@ -22,6 +22,40 @@ export type User = {
   preferences?: any;
 };
 
+export type AIConsultPlan = {
+  id?: string;
+  timestamp?: number;
+  symbol: string;
+  interval: string;
+  recommendation: 'LONG' | 'SHORT' | 'WAIT';
+  confidence: number;
+  entryZone: {
+    minPrice: number;
+    maxPrice: number;
+    idealEntry: number;
+  };
+  stopLoss: {
+    price: number;
+    percentage: number;
+    rationale: string;
+  };
+  takeProfit: Array<{
+    level: string;
+    price: number;
+    rrRatio: string;
+    closePct: number;
+  }>;
+  riskRewardRatio: number;
+  suggestedLeverage: string;
+  recommendedRiskPct: number;
+  analysisSummary: {
+    candlestickPattern?: string;
+    technicalConfluence?: string;
+    newsSentiment?: string;
+    keyWarning?: string;
+  };
+};
+
 interface TradingStore {
   user: User | null;
   token: string | null;
@@ -29,6 +63,8 @@ interface TradingStore {
   interval: string;
   signals: SignalMarker[];
   indicators: IndicatorConfig[];
+  aiConsultPlan: AIConsultPlan | null;
+  isAiConsultLoading: boolean;
   setPair: (pair: string) => void;
   setInterval: (interval: string) => void;
   addSignal: (signal: SignalMarker) => void;
@@ -37,6 +73,8 @@ interface TradingStore {
   addIndicator: (indicatorId: string, defaultParams: Record<string, any>) => void;
   removeIndicator: (instanceId: string) => void;
   updateIndicatorParams: (instanceId: string, params: Record<string, any>) => void;
+  setAiConsultPlan: (plan: AIConsultPlan | null) => void;
+  setIsAiConsultLoading: (loading: boolean) => void;
   login: (user: User, token: string) => void;
   logout: () => void;
 }
@@ -70,6 +108,10 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
     interval: '1m',
     signals: [],
     indicators: defaultIndicators,
+    aiConsultPlan: null,
+    isAiConsultLoading: false,
+    setAiConsultPlan: (plan) => set({ aiConsultPlan: plan }),
+    setIsAiConsultLoading: (loading) => set({ isAiConsultLoading: loading }),
     setPair: (pair) => { set({ pair }); syncPreferences(); },
     setInterval: (interval) => { set({ interval }); syncPreferences(); },
   addSignal: (signal) => set((state) => ({ signals: [...state.signals, signal] })),

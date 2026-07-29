@@ -38,13 +38,20 @@ export default function AIConsultantCard() {
     setIsAiConsultLoading(true);
     setErrorMsg('');
     try {
-      // Call backend API for AI Consultation
-      const res = await apiGet(`/api/live/ai-consult?symbol=${pair}&interval=${interval}`, token || undefined);
+      if (!token) {
+        setErrorMsg('Vui lòng Đăng nhập để sử dụng AI Cố vấn Realtime. (Đang dùng dữ liệu Demo)');
+      }
+
+      // Call backend API for AI Consultation if token exists
+      let res: any = null;
+      if (token) {
+        res = await apiGet(`/api/live/ai-consult?symbol=${pair}&interval=${interval}`, token);
+      }
       
-      if (res && (res as any).recommendation) {
+      if (res && res.recommendation) {
         setAiConsultPlan(res as AIConsultPlan);
       } else {
-        // Mock fallback blueprint for instant UI feedback if backend endpoint is initializing
+        // Mock fallback blueprint for instant UI feedback or guest mode
         const mockPrice = pair.startsWith('BTC') ? 95420 : pair.startsWith('ETH') ? 3420 : 2650;
         const isLong = Math.random() > 0.4;
         const mockPlan: AIConsultPlan = {
@@ -93,8 +100,14 @@ export default function AIConsultantCard() {
         setAiConsultPlan(mockPlan);
       }
     } catch (err: any) {
-      console.error('AI Consult Fetch Error:', err);
-      // Generate clean client-side advisory model if server fails
+      console.warn('AI Consult Auth/Fetch Warning:', err.message);
+      if (err.message?.includes('credentials') || err.message?.includes('401')) {
+        setErrorMsg('Phiên đăng nhập đã hết hạn. Vui lòng Đăng nhập lại để kết nối AI Realtime.');
+      } else {
+        setErrorMsg(err.message || 'Không thể tạo Kế hoạch Cố vấn AI.');
+      }
+      
+      // Fallback demo plan so UI never breaks
       const mockPrice = pair.startsWith('BTC') ? 95400 : 3400;
       setAiConsultPlan({
         symbol: pair,
@@ -107,22 +120,22 @@ export default function AIConsultantCard() {
           idealEntry: mockPrice,
         },
         stopLoss: {
-          price: Math.round(mockPrice * 0.986),
-          percentage: 1.4,
-          rationale: 'Đặt dưới mốc hỗ trợ nến 15m trùng cản Fibonacci 0.618.',
+          price: Math.round(mockPrice * 0.988),
+          percentage: 1.2,
+          rationale: 'Đặt dưới mốc Swing Low 50 nến gần nhất.',
         },
         takeProfit: [
-          { level: 'TP1', price: Math.round(mockPrice * 1.016), rrRatio: '1:1.14', closePct: 50 },
-          { level: 'TP2', price: Math.round(mockPrice * 1.032), rrRatio: '1:2.28', closePct: 50 },
+          { level: 'TP1 (50% Vị thế)', price: Math.round(mockPrice * 1.015), rrRatio: '1:1.5', closePct: 50 },
+          { level: 'TP2 (Chốt hết)', price: Math.round(mockPrice * 1.03), rrRatio: '1:2.5', closePct: 50 },
         ],
-        riskRewardRatio: 2.28,
-        suggestedLeverage: '5x',
+        riskRewardRatio: 2.1,
+        suggestedLeverage: '5x - 10x Cross',
         recommendedRiskPct: 1.5,
         analysisSummary: {
-          candlestickPattern: 'Nến Engulfing tăng lực mua mạnh tại cản tĩnh.',
-          technicalConfluence: 'RSI(14) phục hồi từ vùng quá bán 32.',
-          newsSentiment: 'Tin tức vĩ mô trung tính. Không có biến động bất ngờ.',
-          keyWarning: 'Đặt cảnh báo giá tại mốc Entry trước khi mở lệnh.',
+          candlestickPattern: 'Nến rút chân phản ứng tốt tại hỗ trợ.',
+          technicalConfluence: 'RSI vùng quá bán đang hướng lên.',
+          newsSentiment: 'Tâm lý thị trường trung tính.',
+          keyWarning: 'Dùng chế độ Demo. Vui lòng đăng nhập lại.',
         },
       });
     } finally {

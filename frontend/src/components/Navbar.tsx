@@ -1,5 +1,5 @@
 'use client';
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useTradingStore } from '@/store/useStore';
 import { 
   Bot, 
@@ -30,6 +30,11 @@ const TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h'];
 
 export default function Navbar({ activeTab, onSelectTab, onOpenAuth }: NavbarProps) {
   const { pair, setPair, interval, setInterval, user, logout } = useTradingStore();
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   return (
     <header className="h-16 border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-md px-4 md:px-6 flex items-center justify-between z-30 shrink-0 select-none">
@@ -50,36 +55,34 @@ export default function Navbar({ activeTab, onSelectTab, onOpenAuth }: NavbarPro
           </div>
         </div>
 
-        {/* Separator */}
-        <div className="h-6 w-px bg-zinc-800 hidden sm:block" />
-
-        {/* Asset Pair Switcher */}
-        <div className="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800">
-          {AVAILABLE_PAIRS.map((item) => (
-            <button
-              key={item.symbol}
-              onClick={() => setPair(item.symbol)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer ${
-                pair === item.symbol
-                  ? 'bg-emerald-500 text-zinc-950 shadow-md font-bold'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-              }`}
-            >
-              {item.label}
-            </button>
-          ))}
+        {/* Pair Selector Dropdown */}
+        <div className="relative group">
+          <select
+            value={pair}
+            onChange={(e) => setPair(e.target.value)}
+            className="appearance-none bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-semibold px-3 py-1.5 pr-8 rounded-xl cursor-pointer focus:outline-none focus:border-emerald-500/50 transition-all font-mono"
+          >
+            {AVAILABLE_PAIRS.map((p) => (
+              <option key={p.symbol} value={p.symbol} className="bg-zinc-900 text-zinc-200 py-1">
+                {p.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
         </div>
+      </div>
 
-        {/* Timeframe Selector */}
-        <div className="hidden md:flex items-center gap-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800">
+      {/* ── Timeframe Switcher ────────────────────────────────────────────────── */}
+      <div className="hidden md:flex items-center gap-2 bg-zinc-900/60 p-1 rounded-2xl border border-zinc-800/80">
+        <div className="flex items-center gap-1 px-1">
           {TIMEFRAMES.map((tf) => (
             <button
               key={tf}
               onClick={() => setInterval(tf)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer ${
+              className={`px-3 py-1 rounded-xl text-xs font-mono font-semibold transition-all cursor-pointer ${
                 interval === tf
-                  ? 'bg-zinc-800 text-emerald-400 font-bold border border-emerald-500/30'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/40'
+                  ? 'bg-emerald-500 text-zinc-950 font-bold shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'
               }`}
             >
               {tf}
@@ -96,8 +99,10 @@ export default function Navbar({ activeTab, onSelectTab, onOpenAuth }: NavbarPro
           <span>Binance Stream</span>
         </div>
 
-        {/* User Account Button */}
-        {user ? (
+        {/* User Account Button — Protected with mounted check against React Hydration mismatch */}
+        {!mounted ? (
+          <div className="h-8 w-24 bg-zinc-900/60 animate-pulse rounded-xl" />
+        ) : user ? (
           <div className="flex items-center gap-2 bg-zinc-900/90 pl-3 pr-1.5 py-1 rounded-xl border border-zinc-800">
             <div className="flex items-center gap-2">
               <ShieldCheck size={16} className="text-emerald-400" />

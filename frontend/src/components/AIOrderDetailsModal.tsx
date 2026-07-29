@@ -259,7 +259,7 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
 
           <div className="flex items-center gap-2">
             {/* Re-Analyze Button for PENDING orders ONLY */}
-            {isPending ? (
+            {isPending && (
               <button
                 onClick={handleReanalyze}
                 disabled={isReanalyzing}
@@ -269,10 +269,6 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
                 <RotateCw size={13} className={isReanalyzing ? 'animate-spin' : ''} />
                 <span>{isReanalyzing ? 'Đang phân tích...' : 'Phân tích lại'}</span>
               </button>
-            ) : (
-              <span className="text-[10px] font-mono text-zinc-500 bg-zinc-950 px-2 py-1 rounded border border-zinc-800">
-                Đã chạy/kết thúc (Không phân tích lại)
-              </span>
             )}
 
             <button

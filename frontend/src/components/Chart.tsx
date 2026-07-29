@@ -593,6 +593,78 @@ export default function ChartComponent() {
 
   }, [chartData, indicators]);
 
+  // 5. Handle AI Consult Overlay Lines (Entry, SL, TP1, TP2)
+  const aiConsultPlan = useTradingStore((state) => state.aiConsultPlan);
+  const priceLinesRef = useRef<any[]>([]);
+
+  useEffect(() => {
+    if (!seriesRef.current) return;
+
+    // Clear existing price lines
+    priceLinesRef.current.forEach((line) => {
+      try {
+        seriesRef.current?.removePriceLine(line);
+      } catch (e) {}
+    });
+    priceLinesRef.current = [];
+
+    if (!aiConsultPlan) return;
+
+    try {
+      // 1. Entry Line
+      const entryLine = seriesRef.current.createPriceLine({
+        price: aiConsultPlan.entryZone.idealEntry,
+        color: '#3b82f6',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: `AI Entry: $${aiConsultPlan.entryZone.idealEntry}`,
+      });
+      priceLinesRef.current.push(entryLine);
+
+      // 2. Stop Loss Line
+      const slLine = seriesRef.current.createPriceLine({
+        price: aiConsultPlan.stopLoss.price,
+        color: '#f43f5e',
+        lineWidth: 2,
+        lineStyle: 0,
+        axisLabelVisible: true,
+        title: `AI SL (-${aiConsultPlan.stopLoss.percentage}%): $${aiConsultPlan.stopLoss.price}`,
+      });
+      priceLinesRef.current.push(slLine);
+
+      // 3. Take Profit 1 Line
+      if (aiConsultPlan.takeProfit && aiConsultPlan.takeProfit[0]) {
+        const tp1 = aiConsultPlan.takeProfit[0];
+        const tp1Line = seriesRef.current.createPriceLine({
+          price: tp1.price,
+          color: '#10b981',
+          lineWidth: 2,
+          lineStyle: 1,
+          axisLabelVisible: true,
+          title: `AI ${tp1.level}: $${tp1.price}`,
+        });
+        priceLinesRef.current.push(tp1Line);
+      }
+
+      // 4. Take Profit 2 Line
+      if (aiConsultPlan.takeProfit && aiConsultPlan.takeProfit[1]) {
+        const tp2 = aiConsultPlan.takeProfit[1];
+        const tp2Line = seriesRef.current.createPriceLine({
+          price: tp2.price,
+          color: '#14b8a6',
+          lineWidth: 2,
+          lineStyle: 1,
+          axisLabelVisible: true,
+          title: `AI ${tp2.level}: $${tp2.price}`,
+        });
+        priceLinesRef.current.push(tp2Line);
+      }
+    } catch (e) {
+      console.error('Failed to create AI Overlay PriceLines', e);
+    }
+  }, [aiConsultPlan]);
+
   // Tool selection handler — updates both state and ref (ref is used in subscribeClick closure)
   const handleSelectTool = useCallback((tool: string | null) => {
     // Reset any pending drawing when switching tools

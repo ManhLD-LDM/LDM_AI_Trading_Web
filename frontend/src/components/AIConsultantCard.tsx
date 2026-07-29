@@ -339,6 +339,26 @@ export default function AIConsultantCard() {
               </div>
             )}
           </div>
+
+          {/* ── Trader Approval & Execution Action Bar ─────────────────────────── */}
+          <div className="flex items-center justify-between p-3 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 rounded-xl border border-zinc-800">
+            <div className="flex items-center gap-2 text-xs font-mono text-emerald-400">
+              <CheckCircle2 size={16} />
+              <span>Đã tự động vẽ mốc Entry, SL, TP1/TP2 lên biểu đồ!</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  alert(`Đã duyệt Kế hoạch ${aiConsultPlan.recommendation} cho ${aiConsultPlan.symbol}!\nVui lòng chọn tab Paper Trading hoặc Live Trade để xác nhận đặt lệnh.`);
+                }}
+                className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold px-4 py-2 rounded-xl text-xs transition-all active:scale-95 cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.2)]"
+              >
+                <ArrowRight size={14} />
+                <span>Duyệt & Đặt Lệnh</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

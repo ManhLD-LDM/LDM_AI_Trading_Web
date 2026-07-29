@@ -1,7 +1,8 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTradingStore, AIConsultPlan } from '@/store/useStore';
-import { X, Sparkles, Activity, History, TrendingUp, TrendingDown, Eye, ChevronRight } from 'lucide-react';
+import { apiGet } from '@/lib/api';
+import { X, Sparkles, Activity, History, TrendingUp, TrendingDown, Eye, ChevronRight, RefreshCw } from 'lucide-react';
 import AIOrderDetailsModal from './AIOrderDetailsModal';
 
 interface SidebarProps {
@@ -10,9 +11,32 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
-  const { pair, interval, aiConsultHistory, aiConsultPlan } = useTradingStore();
+  const { pair, interval, aiConsultHistory, aiConsultPlan, token, setAiConsultPlan } = useTradingStore();
   const [selectedPlan, setSelectedPlan] = useState<AIConsultPlan | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const fetchHistoryFromDb = useCallback(async () => {
+    if (!token) return;
+    setIsLoadingHistory(true);
+    try {
+      const res = await apiGet<{ history: AIConsultPlan[] }>('/api/live/ai-consult/history', token);
+      if (res && res.history && Array.isArray(res.history) && res.history.length > 0) {
+        // Sync database history into Zustand store
+        res.history.forEach((plan) => {
+          useTradingStore.getState().setAiConsultPlan(plan);
+        });
+      }
+    } catch (e) {
+      console.warn('Failed to fetch AI history from DB:', e);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchHistoryFromDb();
+  }, [fetchHistoryFromDb]);
 
   const handleOpenDetails = (plan: AIConsultPlan) => {
     setSelectedPlan(plan);
@@ -48,12 +72,21 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
               {allPlans.length}
             </span>
           </h2>
-          <button 
-            onClick={onClose}
-            className="md:hidden p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:scale-95 transition-all"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={fetchHistoryFromDb}
+              title="Làm mới lịch sử"
+              className="p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-all cursor-pointer"
+            >
+              <RefreshCw size={14} className={isLoadingHistory ? 'animate-spin' : ''} />
+            </button>
+            <button 
+              onClick={onClose}
+              className="md:hidden p-1.5 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 active:scale-95 transition-all"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
       
         {/* History List */}

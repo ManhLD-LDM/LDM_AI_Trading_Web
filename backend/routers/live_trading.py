@@ -328,10 +328,45 @@ async def get_ai_consultation(
             sentiment_analysis=sentiment_analysis,
         )
 
+        # Persist consultation plan to MongoDB for user history retention
+        if is_connected():
+            db = get_database()
+            doc = {
+                "email": current_user_email,
+                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                "created_at": datetime.now(timezone.utc),
+                **consultation_plan,
+            }
+            await db["ai_consultations"].insert_one(doc)
+
         return consultation_plan
     except HTTPException as he:
         raise he
     except Exception as e:
         logger.error(f"[AI CONSULT] Error generating plan for {sym}: {e}")
         raise HTTPException(500, f"AI Consultation failed: {str(e)}")
+
+
+@router.get("/ai-consult/history")
+async def get_ai_consultation_history(
+    limit: int = 50,
+    current_user_email: str = Depends(get_current_user)
+):
+    """Lấy lịch sử Kế hoạch Cố vấn AI của người dùng từ MongoDB."""
+    if not is_connected():
+        return {"history": []}
+
+    db = get_database()
+    cursor = db["ai_consultations"].find(
+        {"email": current_user_email},
+        sort=[("created_at", -1)],
+        limit=min(limit, 100),
+    )
+    docs = await cursor.to_list(min(limit, 100))
+    for d in docs:
+        d.pop("_id", None)
+        if isinstance(d.get("created_at"), datetime):
+            d["created_at"] = d["created_at"].isoformat()
+    return {"history": docs, "count": len(docs)}
+
 

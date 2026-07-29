@@ -370,12 +370,135 @@ async def get_ai_consultation(
         raise HTTPException(500, f"AI Consultation failed: {str(e)}")
 
 
+async def evaluate_plan_historical_klines(doc: dict) -> dict:
+    """
+    Tự động truy vấn 100 nến Binance 15m để backfill & kiểm tra xem giá đã từng chạm Entry, TP1, TP2 hay SL chưa.
+    Đảm bảo lệnh KHÔNG BAO GIỜ bị quay về trạng thái PENDING nếu giá đã từng chạm Entry trong quá khứ.
+    """
+    current_status = doc.get("status", "PENDING")
+    if current_status in ["WIN_100", "WIN_BE", "LOSS"]:
+        return doc
+
+    sym = doc.get("symbol", "BTCUSDT").upper().replace("/", "")
+    inv = doc.get("interval", "15m")
+    is_long = doc.get("recommendation") == "LONG"
+    
+    entry_zone = doc.get("entryZone", {})
+    ideal_entry = float(entry_zone.get("idealEntry", 0))
+    min_entry = float(entry_zone.get("minPrice", ideal_entry))
+    max_entry = float(entry_zone.get("maxPrice", ideal_entry))
+    sl = float(doc.get("stopLoss", {}).get("price", 0))
+    
+    take_profit = doc.get("takeProfit", [])
+    tp1 = float(take_profit[0].get("price", 0)) if len(take_profit) > 0 else (ideal_entry * 1.015 if is_long else ideal_entry * 0.985)
+    tp2 = float(take_profit[1].get("price", 0)) if len(take_profit) > 1 else (ideal_entry * 1.03 if is_long else ideal_entry * 0.97)
+
+    if not ideal_entry:
+        return doc
+
+    try:
+        from binance_api import get_historical_klines
+        klines = await get_historical_klines(sym, inv, limit=100)
+        if not klines or len(klines) == 0:
+            return doc
+
+        entry_min = min(min_entry, max_entry) * 0.998
+        entry_max = max(min_entry, max_entry) * 1.002
+
+        next_status = current_status
+        activated_at = doc.get("activatedAt")
+        completed_at = doc.get("completedAt")
+        current_sl = doc.get("currentSlPrice", sl)
+
+        for k in klines:
+            high = float(k[2])
+            low = float(k[3])
+
+            if next_status == "PENDING":
+                if is_long:
+                    if high >= entry_min:
+                        next_status = "ACTIVE"
+                        activated_at = activated_at or int(k[0])
+                else:
+                    if low <= entry_max:
+                        next_status = "ACTIVE"
+                        activated_at = activated_at or int(k[0])
+
+            if next_status == "ACTIVE":
+                if is_long:
+                    if high >= tp1:
+                        next_status = "PARTIAL_TP1"
+                        current_sl = ideal_entry
+                    elif low <= sl:
+                        next_status = "LOSS"
+                        completed_at = int(k[0])
+                else:
+                    if low <= tp1:
+                        next_status = "PARTIAL_TP1"
+                        current_sl = ideal_entry
+                    elif high >= sl:
+                        next_status = "LOSS"
+                        completed_at = int(k[0])
+
+            if next_status == "PARTIAL_TP1":
+                if is_long:
+                    if high >= tp2:
+                        next_status = "WIN_100"
+                        completed_at = int(k[0])
+                    elif low <= ideal_entry:
+                        next_status = "WIN_BE"
+                        completed_at = int(k[0])
+                else:
+                    if low <= tp2:
+                        next_status = "WIN_100"
+                        completed_at = int(k[0])
+                    elif high >= ideal_entry:
+                        next_status = "WIN_BE"
+                        completed_at = int(k[0])
+
+        if next_status != current_status:
+            doc["status"] = next_status
+            if activated_at: doc["activatedAt"] = activated_at
+            if completed_at: doc["completedAt"] = completed_at
+            doc["currentSlPrice"] = current_sl
+
+            if is_connected():
+                db = get_database()
+                update_fields = {
+                    "status": next_status,
+                    "activatedAt": activated_at,
+                    "completedAt": completed_at,
+                    "currentSlPrice": current_sl,
+                    "updated_at": datetime.now(timezone.utc)
+                }
+                
+                if next_status in ["WIN_100", "WIN_BE", "PARTIAL_TP1", "LOSS"] and "postMortemAnalysis" not in doc:
+                    try:
+                        from agents import StrategyLearnerAgent
+                        learner = StrategyLearnerAgent()
+                        post_m = await learner.analyze_outcome(doc, next_status)
+                        doc["postMortemAnalysis"] = post_m
+                        update_fields["postMortemAnalysis"] = post_m
+                    except Exception as e:
+                        logger.warning(f"Auto post-mortem error: {e}")
+
+                await db["ai_consultations"].update_one(
+                    {"id": doc["id"]},
+                    {"$set": update_fields}
+                )
+
+    except Exception as e:
+        logger.warning(f"Error evaluating plan historical klines: {e}")
+
+    return doc
+
+
 @router.get("/ai-consult/history")
 async def get_ai_consultation_history(
     limit: int = 50,
     current_user_email: str = Depends(get_current_user)
 ):
-    """Lấy lịch sử Kế hoạch Cố vấn AI của người dùng từ MongoDB."""
+    """Lấy lịch sử Kế hoạch Cố vấn AI của người dùng từ MongoDB với tự động backfill kết quả từ nến Binance."""
     if not is_connected():
         return {"history": []}
 
@@ -386,13 +509,19 @@ async def get_ai_consultation_history(
         limit=min(limit, 100),
     )
     docs = await cursor.to_list(min(limit, 100))
+    evaluated_docs = []
     for d in docs:
         if "_id" in d:
             d["id"] = d.get("id") or str(d["_id"])
             d.pop("_id", None)
         if isinstance(d.get("created_at"), datetime):
             d["created_at"] = d["created_at"].isoformat()
-    return {"history": docs, "count": len(docs)}
+        
+        # Backfill & evaluate historical klines for each plan
+        evaluated = await evaluate_plan_historical_klines(d)
+        evaluated_docs.append(evaluated)
+
+    return {"history": evaluated_docs, "count": len(evaluated_docs)}
 
 
 @router.put("/ai-consult/status")

@@ -135,11 +135,19 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
     setAiConsultPlan: (plan) => set((state) => {
       if (!plan) return { aiConsultPlan: null };
       const planKey = getPlanDedupeKey(plan);
+      const existing = state.aiConsultHistory.find(p => getPlanDedupeKey(p) === planKey);
+      
+      const currentStatus = plan.status || (existing && existing.status !== 'PENDING' ? existing.status : 'PENDING');
+
       const planWithMeta: AIConsultPlan = {
         ...plan,
         id: planKey,
         timestamp: plan.timestamp || Date.now(),
-        status: plan.status || 'PENDING',
+        status: currentStatus,
+        activatedAt: plan.activatedAt || existing?.activatedAt,
+        completedAt: plan.completedAt || existing?.completedAt,
+        currentSlPrice: plan.currentSlPrice || existing?.currentSlPrice,
+        postMortemAnalysis: plan.postMortemAnalysis || existing?.postMortemAnalysis,
       };
       
       const filtered = state.aiConsultHistory.filter(p => getPlanDedupeKey(p) !== planKey);
@@ -149,18 +157,26 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
       };
     }),
 
-    setAiConsultHistory: (history) => set(() => {
+    setAiConsultHistory: (history) => set((state) => {
       const seen = new Set<string>();
       const deduplicated: AIConsultPlan[] = [];
+      
       for (const p of history) {
         const key = getPlanDedupeKey(p);
         if (!seen.has(key)) {
           seen.add(key);
+          const existing = state.aiConsultHistory.find(ex => getPlanDedupeKey(ex) === key);
+          const finalStatus = p.status || (existing && existing.status !== 'PENDING' ? existing.status : 'PENDING');
+
           deduplicated.push({
             ...p,
             id: key,
             timestamp: p.timestamp || Date.now(),
-            status: p.status || 'PENDING',
+            status: finalStatus,
+            activatedAt: p.activatedAt || existing?.activatedAt,
+            completedAt: p.completedAt || existing?.completedAt,
+            currentSlPrice: p.currentSlPrice || existing?.currentSlPrice,
+            postMortemAnalysis: p.postMortemAnalysis || existing?.postMortemAnalysis,
           });
         }
       }
@@ -189,10 +205,16 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
         let completedAt = plan.completedAt;
         let currentSlPrice = plan.currentSlPrice || sl;
 
+        // Robust activation check:
+        // Trigger ACTIVE if price touches entry range OR has already moved into trade direction past ideal entry
         if (currentStatus === 'PENDING') {
-          const entryMin = Math.min(minEntry, maxEntry) * 0.999;
-          const entryMax = Math.max(minEntry, maxEntry) * 1.001;
-          if (price >= entryMin && price <= entryMax) {
+          const entryMin = Math.min(minEntry, maxEntry) * 0.998;
+          const entryMax = Math.max(minEntry, maxEntry) * 1.002;
+          
+          const isActivatedLong = isLong && (price >= entryMin || price >= idealEntry * 0.998);
+          const isActivatedShort = !isLong && (price <= entryMax || price <= idealEntry * 1.002);
+
+          if (isActivatedLong || isActivatedShort) {
             nextStatus = 'ACTIVE';
             activatedAt = Date.now();
             hasStateChanges = true;
@@ -267,7 +289,6 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
               currentSlPrice,
             }, state.token).then((res: any) => {
               if (res && res.postMortemAnalysis) {
-                // Update postMortemAnalysis in state
                 useTradingStore.setState((s) => ({
                   aiConsultHistory: s.aiConsultHistory.map(p => p.id === plan.id ? { ...p, postMortemAnalysis: res.postMortemAnalysis } : p)
                 }));

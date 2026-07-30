@@ -207,15 +207,31 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
 }
 
 export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDetailsModalProps) {
-  const { token, setAiConsultPlan } = useTradingStore();
+  const { pair, setPair, token, setAiConsultPlan, aiConsultPlan: currentMainPlan } = useTradingStore();
   const [isReanalyzing, setIsReanalyzing] = useState(false);
   const [reanalyzeMsg, setReanalyzeMsg] = useState('');
+  const [attachMsg, setAttachMsg] = useState('');
 
   if (!isOpen || !plan) return null;
 
   const isLong = plan.recommendation === 'LONG';
   const isWait = plan.recommendation === 'WAIT';
   const isPending = !plan.status || plan.status === 'PENDING';
+
+  // Can attach to main chart ONLY if order is PENDING ("chờ Entry") or ACTIVE/PARTIAL_TP1 ("Đang chạy")
+  // Disabled if order has hit SL or closed completely (WIN_100, WIN_BE, LOSS)
+  const isAttachable = !plan.status || plan.status === 'PENDING' || plan.status === 'ACTIVE' || plan.status === 'PARTIAL_TP1';
+  const isAttachedToMainChart = currentMainPlan?.id === plan.id || (currentMainPlan?.symbol === plan.symbol && currentMainPlan?.entryZone?.idealEntry === plan.entryZone?.idealEntry);
+
+  const handleAttachToMainChart = () => {
+    if (!isAttachable) return;
+    if (plan.symbol && plan.symbol !== pair) {
+      setPair(plan.symbol);
+    }
+    setAiConsultPlan(plan);
+    setAttachMsg(`✓ Đã gắn mốc Entry, SL, TP của lệnh ${plan.symbol} lên Chart lớn!`);
+    setTimeout(() => setAttachMsg(''), 4000);
+  };
 
   const handleReanalyze = async () => {
     if (!token || !plan.id || !isPending) return;
@@ -252,12 +268,31 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
 
             {getStatusBadge(plan.status)}
 
-            <div className="text-xs font-mono text-zinc-400">
+            <div className="text-xs font-mono text-zinc-400 hidden sm:block">
               Khung: <strong className="text-zinc-200 uppercase">15M</strong> • Tin cậy: <strong className="text-emerald-400">{plan.confidence}%</strong>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Attach to Main Chart Button (Enabled ONLY if PENDING or ACTIVE) */}
+            <button
+              onClick={handleAttachToMainChart}
+              disabled={!isAttachable}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                isAttachable
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-sm active:scale-95 cursor-pointer'
+                  : 'bg-zinc-800 text-zinc-500 border border-zinc-700/60 cursor-not-allowed opacity-60'
+              }`}
+              title={
+                isAttachable
+                  ? 'Gắn mốc Entry, SL, TP của lệnh này lên Chart lớn'
+                  : 'Lệnh đã đóng/kết thúc (WIN/LOSS/SL) — không thể gắn lên Chart lớn'
+              }
+            >
+              <Target size={13} />
+              <span>{isAttachedToMainChart ? '✓ Đã gắn Chart' : 'Gắn lên Chart lớn'}</span>
+            </button>
+
             {/* Re-Analyze Button for PENDING orders ONLY */}
             {isPending && (
               <button
@@ -267,7 +302,7 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
                 title="Phân tích lại mốc Entry/SL/TP dựa trên nến mới nhất"
               >
                 <RotateCw size={13} className={isReanalyzing ? 'animate-spin' : ''} />
-                <span>{isReanalyzing ? 'Đang phân tích...' : 'Phân tích lại'}</span>
+                <span className="hidden sm:inline">{isReanalyzing ? 'Đang phân tích...' : 'Phân tích lại'}</span>
               </button>
             )}
 
@@ -279,6 +314,16 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
             </button>
           </div>
         </div>
+
+        {attachMsg && (
+          <div className="px-4 py-2 bg-emerald-500/10 text-emerald-300 text-xs font-mono border-b border-emerald-500/20 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <CheckCircle2 size={14} className="text-emerald-400" />
+              {attachMsg}
+            </span>
+            <button onClick={() => setAttachMsg('')} className="text-zinc-400 hover:text-zinc-100">✕</button>
+          </div>
+        )}
 
         {reanalyzeMsg && (
           <div className="px-4 py-2 bg-amber-500/10 text-amber-300 text-xs font-mono border-b border-amber-500/20 flex items-center justify-between">
@@ -438,6 +483,41 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
 
           {/* Interactive TradingView Setup Chart */}
           <RealLightweightSetupChart plan={plan} />
+
+          {/* Action Bar: Attach to Main Chart */}
+          <div className="flex items-center justify-between p-3.5 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 rounded-xl border border-zinc-800">
+            <div className="flex items-center gap-2 text-xs font-mono">
+              {isAttachable ? (
+                <span className="text-emerald-400 font-medium flex items-center gap-1.5">
+                  <CheckCircle2 size={15} />
+                  <span>Lệnh {isPending ? 'CHỜ ENTRY' : 'ĐANG CHẠY'} — Sẵn sàng gắn mốc lên Chart lớn</span>
+                </span>
+              ) : (
+                <span className="text-rose-400 font-medium flex items-center gap-1.5">
+                  <AlertOctagon size={15} />
+                  <span>Lệnh đã kết thúc (Hit SL/TP) — Không thể gắn mốc lên Chart lớn</span>
+                </span>
+              )}
+            </div>
+
+            <button
+              onClick={handleAttachToMainChart}
+              disabled={!isAttachable}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                isAttachable
+                  ? 'bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-[0_0_15px_rgba(16,185,129,0.2)] active:scale-95 cursor-pointer'
+                  : 'bg-zinc-800 text-zinc-500 border border-zinc-700/60 cursor-not-allowed opacity-60'
+              }`}
+              title={
+                isAttachable
+                  ? 'Gắn mốc Entry, SL, TP của lệnh này lên Chart lớn'
+                  : 'Lệnh đã đóng/kết thúc (WIN/LOSS/SL) — Không thể sử dụng chức năng này'
+              }
+            >
+              <Target size={14} />
+              <span>{isAttachedToMainChart ? '✓ Đã gắn mốc lên Chart lớn' : 'Gắn mốc lên Chart lớn'}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>

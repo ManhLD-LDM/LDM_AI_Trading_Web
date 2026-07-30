@@ -402,7 +402,7 @@ async def evaluate_plan_historical_klines(doc: dict) -> dict:
     try:
         from binance_api import get_historical_klines
         klines = await get_historical_klines(sym, inv, limit=100)
-        if not klines or len(klines) == 0:
+        if klines is None or len(klines) == 0:
             return doc
 
         entry_min = min(min_entry, max_entry) * 0.998

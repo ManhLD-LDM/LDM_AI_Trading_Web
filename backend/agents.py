@@ -125,10 +125,17 @@ class TechnicalAgent:
 
 class SentimentAgent:
     async def analyze(self, symbol: str) -> str:
-        sys_prompt = "Bạn là Sentiment Analyst. Đánh giá tin tức thị trường và cộng đồng. PHẦN ĐÁNH GIÁ PHẢI ĐƯỢC VIẾT HOÀN TOÀN BẰNG TIẾNG VIỆT."
+        sys_prompt = (
+            "Bạn là Crypto Sentiment Analyst. "
+            "Nhiệm vụ của bạn là đọc danh sách tin tức thực tế bên dưới và tóm tắt ngắn gọn (2-3 câu).\n\n"
+            "QUY TẮC BẮT BUỘC:\n"
+            "1. Chỉ tóm tắt dựa trên CÁC TIÊU ĐỀ TIN TỨC THỰC TẾ được cung cấp trong USER INPUT.\n"
+            "2. TUYỆT ĐỐI KHÔNG tự vẽ ra tin tức vĩ mô (như ETF, thị trường Nhật Bản, quỹ phòng hộ...) nếu không có trong danh sách.\n"
+            "3. Nếu nguồn ghi 'Không có tin tức vĩ mô...', bạn BẮT BUỘC phải ghi: 'Không có tin tức vĩ mô đột biến trong 24h qua cho tài sản này.'"
+        )
         from news_analyzer import fetch_crypto_news
         news = await fetch_crypto_news(symbol)
-        user_prompt = f"Tin tức gần đây về {symbol}:\n{news}"
+        user_prompt = f"Danh sách tiêu đề tin tức thực tế vừa cào được về {symbol}:\n{news}"
         return await call_agent(sys_prompt, user_prompt)
 
 
@@ -201,14 +208,15 @@ class TraderAgent:
             f"Tài sản: {symbol} | Khung: {interval} | Chế độ: {mode_upper}. "
             f"Giá hiện tại: {current_price}. ATR(14) = {atr:.2f}.\n"
             f"{score_info}\n\n"
-            "QUAN TRỌNG: Bạn KHÔNG được đề xuất bất kỳ mức giá Entry, SL, hay TP nào — "
-            "chúng đã được tính toán bằng toán học. Nhiệm vụ của bạn CHỈ LÀ viết phân tích "
-            "narrative bằng Tiếng Việt.\n\n"
+            "QUAN TRỌNG:\n"
+            "1. KHÔNG được đề xuất bất kỳ mức giá Entry, SL, hay TP nào — chúng đã được tính toán bằng toán học.\n"
+            "2. Trong mục 'newsSentiment': Tóm tắt chính xác dựa trên thông tin thực tế từ phần phân tích tin tức. "
+            "TUYỆT ĐỐI KHÔNG tự bịa ra thông tin về ETF, Nhật Bản, hay chính sách vĩ mô không có trong dữ liệu!\n\n"
             "Trả về ĐÚNG MỘT OBJECT JSON (không markdown, không ```json```):\n"
             "{\n"
             '  "candlestickPattern": "Nhận diện mẫu nến hợp lưu đa khung (15m/1h/4h/1D) bằng Tiếng Việt",\n'
             '  "technicalConfluence": "Phân tích chỉ số kỹ thuật đa khung bằng Tiếng Việt",\n'
-            '  "newsSentiment": "Tóm tắt tâm lý tin tức bằng Tiếng Việt",\n'
+            '  "newsSentiment": "Tóm tắt tâm lý tin tức thực tế bằng Tiếng Việt",\n'
             '  "keyWarning": "Cảnh báo rủi ro và sự kiện quan trọng bằng Tiếng Việt"\n'
             "}"
         )

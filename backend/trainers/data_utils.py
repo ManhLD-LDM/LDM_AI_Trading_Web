@@ -54,6 +54,56 @@ def resample_and_shift(df_1m, timeframe):
     indicator_cols = [c for c in resampled.columns if c not in ['open', 'high', 'low', 'close', 'volume']]
     return resampled[indicator_cols]
 
+def triple_barrier_label(df, max_holding_bars=15, tp_atr_mult=2.0, sl_atr_mult=1.5):
+    """
+    Triple Barrier Labeling — dùng ATR làm rào cản thay vì so sánh giá đơn thuần.
+
+    Barrier 1 (Take Profit): Giá chạm +tp_atr_mult * ATR → label = 1 (LONG signal đúng)
+    Barrier 2 (Stop Loss):   Giá chạm -sl_atr_mult * ATR → label = 2 (SHORT signal đúng)
+    Barrier 3 (Timeout):     Hết max_holding_bars mà chưa chạm barrier → label = 0 (WAIT/Neutral)
+
+    Returns: np.ndarray với giá trị 0 (WAIT), 1 (LONG), hoặc 2 (SHORT).
+    """
+    close = df['close'].values.astype(float)
+    high = df['high'].values.astype(float)
+    low = df['low'].values.astype(float)
+
+    # Tính ATR(14) nội bộ cho labeling
+    prev_close = np.roll(close, 1)
+    prev_close[0] = close[0]
+    tr = np.maximum(high - low, np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)))
+    atr = pd.Series(tr).rolling(14).mean().bfill().values
+
+    labels = np.zeros(len(df), dtype=int)  # default = 0 (WAIT)
+
+    for i in range(len(df) - max_holding_bars):
+        entry_price = close[i]
+        current_atr = atr[i]
+
+        if current_atr < 1e-8:
+            continue
+
+        tp_barrier = entry_price + tp_atr_mult * current_atr  # Upper barrier
+        sl_barrier = entry_price - sl_atr_mult * current_atr  # Lower barrier
+
+        for j in range(1, max_holding_bars + 1):
+            future_idx = i + j
+            if future_idx >= len(df):
+                break
+
+            # Upper barrier hit first → LONG signal was correct
+            if high[future_idx] >= tp_barrier:
+                labels[i] = 1  # LONG
+                break
+            # Lower barrier hit first → SHORT signal was correct
+            elif low[future_idx] <= sl_barrier:
+                labels[i] = 2  # SHORT
+                break
+        # Nếu không break → labels[i] = 0 (timeout → WAIT)
+
+    return labels
+
+
 def prepare_mtf_data(csv_path="BTCUSDT_1m_raw.csv", target_tf="15m", num_chunks=5, purge_len=60):
     """
     Reads 1m data, creates MTF features, labels, and Train/Val/Test.
@@ -88,9 +138,14 @@ def prepare_mtf_data(csv_path="BTCUSDT_1m_raw.csv", target_tf="15m", num_chunks=
         
     df_merged.dropna(inplace=True)
     
-    print(f"Creating labels for target timeframe {target_tf}...")
-    shift_periods = int(pd.to_timedelta(target_tf).total_seconds() // 60)
-    df_merged['target'] = (df_merged['close'].shift(-shift_periods) > df_merged['close']).astype(int)
+    print(f"Creating Triple Barrier labels for target timeframe {target_tf}...")
+    bars_in_target = int(pd.to_timedelta(target_tf).total_seconds() // 60)
+    df_merged['target'] = triple_barrier_label(
+        df_merged,
+        max_holding_bars=max(bars_in_target, 15),
+        tp_atr_mult=2.0,
+        sl_atr_mult=1.5,
+    )
     df_merged.dropna(inplace=True)
     
     feature_cols = [c for c in df_merged.columns if c != 'target']

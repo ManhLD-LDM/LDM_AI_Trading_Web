@@ -12,7 +12,10 @@ def test_read_root():
 def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    res_json = response.json()
+    assert res_json["status"] == "ok"
+    assert "database" in res_json
+    assert "models" in res_json
 
 def test_websocket():
     with client.websocket_connect("/ws") as websocket:

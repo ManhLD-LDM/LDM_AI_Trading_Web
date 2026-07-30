@@ -61,7 +61,7 @@ def train_for_class(class_name, symbols):
         def __init__(self, X_chunks, y_chunks, seq_length=60):
             self.seq_length = seq_length
             self.X_chunks = [torch.tensor(x, dtype=torch.float32) for x in X_chunks]
-            self.y_chunks = [torch.tensor(y, dtype=torch.float32).unsqueeze(1) for y in y_chunks]
+            self.y_chunks = [torch.tensor(y, dtype=torch.long) for y in y_chunks]
             
             self.chunk_offsets = []
             self.chunk_lengths = []
@@ -116,7 +116,7 @@ def train_for_class(class_name, symbols):
     for name, model in models.items():
         print(f"Training {name} on {device}...")
         optimizer = optim.Adam(model.parameters(), lr=0.001, weight_decay=1e-5)
-        criterion = nn.BCELoss()
+        criterion = nn.CrossEntropyLoss()
         
         best_val_loss = float('inf')
         patience = 15
@@ -171,7 +171,7 @@ def train_for_class(class_name, symbols):
             for batch_X, batch_y in test_loader:
                 batch_X = batch_X.to(device)
                 test_out = model(batch_X)
-                test_preds_list.append((test_out > 0.5).float().cpu())
+                test_preds_list.append(test_out.argmax(dim=1).cpu())
                 test_true_list.append(batch_y.cpu())
             
             if test_preds_list:

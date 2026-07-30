@@ -155,12 +155,15 @@ class TechnicalScorer:
         if kronos_prediction:
             trend = kronos_prediction.get('trend', '').lower()
             conf = float(kronos_prediction.get('confidence', 50))
-            if trend == 'up' and conf >= 65:
+            if trend == 'up' and conf >= 60:
                 score_model = int(15 * (conf / 100))
                 reasons.append(f"Kronos AI Ensemble Bullish prediction ({conf:.0f}%)")
-            elif trend == 'down' and conf >= 65:
+            elif trend == 'down' and conf >= 60:
                 score_model = -int(15 * (conf / 100))
                 reasons.append(f"Kronos AI Ensemble Bearish prediction ({conf:.0f}%)")
+            elif trend == 'neutral':
+                score_model = 0  # Model says WAIT → no influence on score
+                reasons.append(f"Kronos AI Ensemble Neutral/WAIT ({conf:.0f}%)")
             else:
                 score_model = 0
             total_score += score_model

@@ -144,134 +144,130 @@ class TraderAgent:
         tech_analysis: str,
         sentiment_analysis: str,
         mtf_klines: dict | None = None,
+        # User overrides for TP/SL
+        user_sl_price: float | None = None,
+        user_tp1_price: float | None = None,
+        user_tp2_price: float | None = None,
     ) -> dict:
-        """Lập Kế hoạch Cố vấn Trading Đa Khung Thời Gian (Multi-Timeframe AI Trading Blueprint)."""
+        """
+        AI Trading Consultant — Lập Kế hoạch Cố vấn Đa Khung Thời Gian.
+
+        Architecture:
+        1. TechnicalScorer → signal direction (LONG/SHORT/WAIT) + confidence
+        2. math_plan_builder → Entry/SL/TP (100% math, 0% LLM)
+        3. LLM (Gemini) → narrative analysis only (giải thích bằng tiếng Việt)
+        """
+        from math_plan_builder import (
+            build_math_plan,
+            calculate_atr,
+            calculate_swing_levels,
+            calculate_support_resistance,
+        )
+
         atr = calculate_atr(candles, 14)
         swing_low, swing_high = calculate_swing_levels(candles, 50)
+        sr_levels = calculate_support_resistance(candles, 100)
         mode_upper = mode.upper() if mode else "SCALP"
 
-        # Deterministic Technical Signal Evaluation
+        # ── Step 1: Deterministic Technical Signal Evaluation ──
         mtf_data_eval = mtf_klines or {interval: candles}
         tech_score = technical_scorer.evaluate(mtf_data_eval, interval, kronos_prediction)
 
-        mode_rules = (
-            "CHẾ ĐỘ GIAO DỊCH: SCALP (LƯỚT SÓNG NẮNG HẠN TRONG NGÀY)\n"
-            "- Ưu tiên chốt lời nhanh trong ngày.\n"
-            "- Tỷ lệ Risk/Reward đề xuất 1:1.5 đến 1:2.0.\n"
-            "- Mốc Stop Loss tối thiểu 0.8% - 1.2% (hoặc 2*ATR) dưới Swing Low gần nhất."
-            if mode_upper == "SCALP" else
-            "CHẾ ĐỘ GIAO DỊCH: SWING (ĐÁNH XU HƯỚNG HOLD > 1 NGÀY)\n"
-            "- Ưu tiên đánh theo Trend lớn (1D/4h), hold lệnh hơn 1 ngày.\n"
-            "- Tỷ lệ Risk/Reward đề xuất 1:2.5 đến 1:4.0.\n"
-            "- Mốc Stop Loss rộng hơn (1.5% - 2.5% hoặc 3*ATR) dưới đáy Swing Low chính của khung 4h/1D."
+        # ── Step 2: MATH calculates Entry/SL/TP (deterministic, 100%) ──
+        math_plan = build_math_plan(
+            signal=tech_score["signal"],
+            confidence=tech_score["confidence"],
+            current_price=current_price,
+            atr=atr,
+            swing_low=swing_low,
+            swing_high=swing_high,
+            mode=mode_upper,
+            support_levels=sr_levels.get("supports"),
+            resistance_levels=sr_levels.get("resistances"),
+            user_sl_price=user_sl_price,
+            user_tp1_price=user_tp1_price,
+            user_tp2_price=user_tp2_price,
+        )
+
+        # ── Step 3: LLM ONLY writes narrative analysis (NO price decisions) ──
+        score_info = (
+            f"ĐIỂM KỸ THUẬT CỨNG: {tech_score['total_score']}/100 → {tech_score['signal']} "
+            f"(Confidence: {tech_score['confidence']}%). "
+            f"Lý do: {', '.join(tech_score['reasons'])}"
         )
 
         sys_prompt = (
-            f"Bạn là Master AI Trading Consultant (Cố vấn Giao dịch Chuyên nghiệp Đa Khung Thời Gian). "
-            f"Tài sản: {symbol} | Khung thời gian người dùng đang xem: {interval} | Chế độ: {mode_upper}. "
-            f"Giá hiện tại: {current_price}. ATR(14) = {atr:.2f}. Swing Low 50 nến = {swing_low:.2f}, Swing High = {swing_high:.2f}.\n"
-            f"ĐIỂM KỸ THUẬT CỨNG (DETERMINISTIC SCORE): {tech_score['total_score']} / 100 -> Tín hiệu khuyến nghị: {tech_score['signal']} (Confidence: {tech_score['confidence']}%).\n"
-            f"Lý do kỹ thuật: {', '.join(tech_score['reasons'])}\n\n"
-            f"{mode_rules}\n\n"
-            "Dựa trên Phân tích Đa Khung (15m, 1h, 4h, 1D, 1W) và Tin tức, hãy ra quyết định giao dịch cho KHUNG HIỆN TẠI mà người dùng đang xem. "
-            "Trả về ĐÚNG MỘT OBJECT JSON duy nhất không chứa bất kỳ văn bản nào khác ngoài JSON theo định dạng:\n"
+            f"Bạn là AI Trading Consultant (Cố vấn Giao dịch). "
+            f"Tài sản: {symbol} | Khung: {interval} | Chế độ: {mode_upper}. "
+            f"Giá hiện tại: {current_price}. ATR(14) = {atr:.2f}.\n"
+            f"{score_info}\n\n"
+            "QUAN TRỌNG: Bạn KHÔNG được đề xuất bất kỳ mức giá Entry, SL, hay TP nào — "
+            "chúng đã được tính toán bằng toán học. Nhiệm vụ của bạn CHỈ LÀ viết phân tích "
+            "narrative bằng Tiếng Việt.\n\n"
+            "Trả về ĐÚNG MỘT OBJECT JSON (không markdown, không ```json```):\n"
             "{\n"
-            '  "recommendation": "' + tech_score['signal'] + '" | "LONG" | "SHORT" | "WAIT",\n'
-            '  "confidence": ' + str(tech_score['confidence']) + ',\n'
-            '  "mode": "' + mode_upper + '",\n'
-            '  "entryZone": {"minPrice": float, "maxPrice": float, "idealEntry": float},\n'
-            '  "stopLoss": {"price": float, "percentage": float, "rationale": "Lý do đặt SL dựa trên Hợp lưu Đa khung & Swing/ATR bằng Tiếng Việt"},\n'
-            '  "takeProfit": [\n'
-            '    {"level": "TP1 (50% Vị thế)", "price": float, "rrRatio": "1:1.5", "closePct": 50},\n'
-            '    {"level": "TP2 (Chốt hết)", "price": float, "rrRatio": "1:2.5", "closePct": 50}\n'
-            '  ],\n'
-            '  "riskRewardRatio": 2.2,\n'
-            '  "suggestedLeverage": "5x - 10x Cross",\n'
-            '  "recommendedRiskPct": 1.5,\n'
-            '  "analysisSummary": {\n'
-            '    "candlestickPattern": "Hợp lưu nến Đa khung (15m/1h/4h/1D) bằng Tiếng Việt",\n'
-            '    "technicalConfluence": "Chỉ số kỹ thuật đa khung bằng Tiếng Việt",\n'
-            '    "newsSentiment": "Tâm lý tin tức bằng Tiếng Việt",\n'
-            '    "keyWarning": "Cảnh báo sự kiện bằng Tiếng Việt"\n'
-            '  }\n'
+            '  "candlestickPattern": "Nhận diện mẫu nến hợp lưu đa khung (15m/1h/4h/1D) bằng Tiếng Việt",\n'
+            '  "technicalConfluence": "Phân tích chỉ số kỹ thuật đa khung bằng Tiếng Việt",\n'
+            '  "newsSentiment": "Tóm tắt tâm lý tin tức bằng Tiếng Việt",\n'
+            '  "keyWarning": "Cảnh báo rủi ro và sự kiện quan trọng bằng Tiếng Việt"\n'
             "}"
         )
 
-        user_prompt = f"Phân tích Đa khung kỹ thuật (MTF):\n{tech_analysis}\n\nPhân tích tâm lý tin tức:\n{sentiment_analysis}"
-        response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="text/plain")
+        user_prompt = (
+            f"Phân tích Đa khung kỹ thuật (MTF):\n{tech_analysis}\n\n"
+            f"Phân tích tâm lý tin tức:\n{sentiment_analysis}"
+        )
 
         try:
-            clean_text = response_text.strip()
-            if clean_text.startswith("```json"):
-                clean_text = clean_text[7:]
-            if clean_text.startswith("```"):
-                clean_text = clean_text[3:]
-            if clean_text.endswith("```"):
-                clean_text = clean_text[:-3]
-
-            plan = json.loads(clean_text.strip())
-            if "recommendation" in plan and "entryZone" in plan and "stopLoss" in plan:
-                plan["symbol"] = symbol
-                plan["interval"] = interval
-                plan["mode"] = mode_upper
-                
-                # Safety check: enforce minimum SL distance based on mode
-                sl_dist = abs(current_price - float(plan["stopLoss"]["price"]))
-                min_ratio = 0.015 if mode_upper == "SWING" else 0.008
-                min_safe_dist = max(2.0 * atr, current_price * min_ratio)
-                if sl_dist < min_safe_dist:
-                    is_long_plan = plan["recommendation"] == "LONG"
-                    safe_sl_price = round(min(current_price - min_safe_dist, swing_low), 2) if is_long_plan else round(max(current_price + min_safe_dist, swing_high), 2)
-                    safe_sl_pct = round(abs(current_price - safe_sl_price) / current_price * 100, 2)
-                    plan["stopLoss"]["price"] = safe_sl_price
-                    plan["stopLoss"]["percentage"] = safe_sl_pct
-                    plan["stopLoss"]["rationale"] += f" (Tự động nâng SL an toàn cho chế độ {mode_upper})."
-
-                return plan
+            response_text = await call_agent(sys_prompt, user_prompt, response_mime_type="text/plain")
+            narrative = _parse_narrative(response_text)
         except Exception as e:
-            agent_logger.warning(f"TraderAgent consult JSON parse failed: {e}. Generating math-anchored fallback plan.")
-
-        # Fallback Plan mathematically calculated using ATR, Swing levels, and Technical Scorer
-        rec = tech_score["signal"]
-        is_long = rec == "LONG"
-        
-        safe_dist = max(2.5 * atr, current_price * (0.015 if mode_upper == "SWING" else 0.01))
-        sl_price = round(min(current_price - safe_dist, swing_low), 2) if is_long else round(max(current_price + safe_dist, swing_high), 2)
-        sl_pct = round(abs(current_price - sl_price) / current_price * 100, 2)
-        
-        multiplier = 2.5 if mode_upper == "SWING" else 1.5
-        tp1_price = round(current_price + (current_price - sl_price) * multiplier, 2) if is_long else round(current_price - (sl_price - current_price) * multiplier, 2)
-        tp2_price = round(current_price + (current_price - sl_price) * (multiplier + 1.2), 2) if is_long else round(current_price - (sl_price - current_price) * (multiplier + 1.2), 2)
-
-        return {
-            "symbol": symbol,
-            "interval": interval,
-            "mode": mode_upper,
-            "recommendation": rec,
-            "confidence": tech_score["confidence"],
-            "entryZone": {
-                "minPrice": round(current_price * (0.998 if is_long else 1.001), 2),
-                "maxPrice": round(current_price * (1.002 if is_long else 1.003), 2),
-                "idealEntry": current_price,
-            },
-            "stopLoss": {
-                "price": sl_price,
-                "percentage": sl_pct,
-                "rationale": f"Đặt dưới mốc hỗ trợ MTF ATR({atr:.2f}) và Swing Low gần nhất ({swing_low:.2f}) cho chế độ {mode_upper}.",
-            },
-            "takeProfit": [
-                {"level": "TP1 (50% Vị thế)", "price": tp1_price, "rrRatio": f"1:{multiplier:.1f}", "closePct": 50},
-                {"level": "TP2 (Chốt hết)", "price": tp2_price, "rrRatio": f"1:{(multiplier + 1.2):.1f}", "closePct": 50},
-            ],
-            "riskRewardRatio": round(multiplier + 0.5, 1),
-            "suggestedLeverage": "2x - 5x Isolated" if mode_upper == "SWING" else "5x - 10x Cross",
-            "recommendedRiskPct": 1.5,
-            "analysisSummary": {
+            agent_logger.warning(f"TraderAgent LLM narrative failed: {e}. Using fallback.")
+            narrative = {
                 "candlestickPattern": f"Phân tích Hợp lưu MTF (15m/1h/4h/1D) cho {symbol}.",
-                "technicalConfluence": f"Chấm điểm kỹ thuật cứng: {tech_score['total_score']}/100. Reasons: {', '.join(tech_score['reasons'])}",
-                "newsSentiment": sentiment_analysis[:150] if sentiment_analysis else "Tâm lý tin tức ở mức trung tính.",
-                "keyWarning": f"Chế độ {mode_upper}: Kiểm tra mốc SL trước khi vào lệnh.",
-            },
+                "technicalConfluence": f"Chấm điểm kỹ thuật cứng: {tech_score['total_score']}/100. {', '.join(tech_score['reasons'])}",
+                "newsSentiment": sentiment_analysis[:200] if sentiment_analysis else "Tâm lý tin tức ở mức trung tính.",
+                "keyWarning": f"Chế độ {mode_upper}: Luôn kiểm tra mốc SL trước khi vào lệnh.",
+            }
+
+        # ── Step 4: Merge math plan + LLM narrative ──
+        math_plan["symbol"] = symbol
+        math_plan["interval"] = interval
+        math_plan["analysisSummary"] = narrative
+        math_plan["techScore"] = {
+            "total": tech_score["total_score"],
+            "breakdown": tech_score.get("breakdown", {}),
+            "reasons": tech_score["reasons"],
+        }
+
+        return math_plan
+
+
+def _parse_narrative(response_text: str) -> dict:
+    """Parse LLM narrative JSON response, with fallback for malformed output."""
+    clean_text = response_text.strip()
+    if clean_text.startswith("```json"):
+        clean_text = clean_text[7:]
+    if clean_text.startswith("```"):
+        clean_text = clean_text[3:]
+    if clean_text.endswith("```"):
+        clean_text = clean_text[:-3]
+
+    try:
+        parsed = json.loads(clean_text.strip())
+        # Ensure all expected keys exist
+        return {
+            "candlestickPattern": parsed.get("candlestickPattern", "Không có dữ liệu."),
+            "technicalConfluence": parsed.get("technicalConfluence", "Không có dữ liệu."),
+            "newsSentiment": parsed.get("newsSentiment", "Tâm lý trung tính."),
+            "keyWarning": parsed.get("keyWarning", "Không có cảnh báo đặc biệt."),
+        }
+    except Exception:
+        return {
+            "candlestickPattern": "Không thể phân tích mẫu nến.",
+            "technicalConfluence": response_text[:300] if response_text else "Không có dữ liệu.",
+            "newsSentiment": "Tâm lý trung tính.",
+            "keyWarning": "Hãy kiểm tra kỹ trước khi vào lệnh.",
         }
 
 

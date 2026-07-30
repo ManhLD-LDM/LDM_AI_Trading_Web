@@ -221,37 +221,46 @@ class ModelEnsemble:
                     # Native XGBoost booster (.json)
                     dmatrix = xgb.DMatrix(X_flat)
                     pred_raw = await asyncio.to_thread(model.predict, dmatrix)
-                    prob = float(pred_raw[0])
+                    raw_out = np.array(pred_raw).flatten()
                 else:
                     # ONNX session fallback
                     input_name = model.get_inputs()[0].name
                     ort_outs = await asyncio.to_thread(model.run, None, {input_name: X_flat})
                     raw_out = ort_outs[0].flatten()
-                    prob = float(raw_out[-1])  # last value = probability of class 1
             else:
                 # LSTM / TCN / Transformer — ONNX, input shape [1, 60, 65]
                 input_name = model.get_inputs()[0].name
                 X_dl = full_features.reshape(1, SEQ_LEN, 65)
                 ort_outs = await asyncio.to_thread(model.run, None, {input_name: X_dl})
                 raw_out = ort_outs[0].flatten()
-                if len(raw_out) == 1:
-                    # Sigmoid output: single value in [0,1]
-                    prob = float(raw_out[0])
-                elif len(raw_out) == 2:
-                    # Softmax output: [p_class0, p_class1]
-                    prob = float(raw_out[1])
-                else:
-                    prob = float(raw_out[-1])
 
-            trend = "up" if prob >= 0.5 else "down"
-            confidence = round(max(prob, 1 - prob) * 100, 2)
+            # Interpret model output — supports both legacy (1-2 outputs) and new 3-class
+            CLASS_MAP = {0: "neutral", 1: "up", 2: "down"}
+
+            if len(raw_out) >= 3:
+                # 3-class logits [WAIT, LONG, SHORT] → apply softmax
+                exp_out = np.exp(raw_out[:3] - np.max(raw_out[:3]))  # numerically stable softmax
+                probs = exp_out / exp_out.sum()
+                class_idx = int(np.argmax(probs))
+                trend = CLASS_MAP[class_idx]
+                confidence = round(float(np.max(probs)) * 100, 2)
+            elif len(raw_out) == 1:
+                # Legacy binary sigmoid output
+                prob = float(raw_out[0])
+                trend = "up" if prob >= 0.5 else "down"
+                confidence = round(max(prob, 1 - prob) * 100, 2)
+            else:
+                # Legacy 2-class softmax
+                prob = float(raw_out[1])
+                trend = "up" if prob >= 0.5 else "down"
+                confidence = round(max(prob, 1 - prob) * 100, 2)
 
             return {
                 "status": "success",
                 "trend": trend,
                 "confidence": confidence,
                 "model_type": model_type,
-                "reason": f"{model_type.upper()} MTF prediction for {symbol} ({N_TIMEFRAMES} timeframes). p={prob:.4f}",
+                "reason": f"{model_type.upper()} MTF prediction for {symbol} ({N_TIMEFRAMES} timeframes). trend={trend}, conf={confidence}%",
             }
 
         except Exception as e:

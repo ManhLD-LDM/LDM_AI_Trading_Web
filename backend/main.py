@@ -29,7 +29,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from fastapi import Request, Security
 from fastapi.security import APIKeyHeader
 
-from routers import backtest, paper, live_trading
+from routers import live_trading
 
 limiter = Limiter(key_func=get_remote_address)
 
@@ -54,9 +54,7 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # IMPORTANT: SlowAPI middleware is added AFTER CORS so OPTIONS preflights
 # are handled by CORS before rate-limit checks run.
-app.include_router(backtest.router, prefix="/api/backtest", tags=["Backtest"])
-app.include_router(paper.router, prefix="/api/paper", tags=["Paper Trading"])
-app.include_router(live_trading.router, prefix="/api/live", tags=["Live Trading"])
+app.include_router(live_trading.router, prefix="/api/live", tags=["AI Consulting"])
 
 # Validation constants
 VALID_SYMBOL_RE = re.compile(r'^[A-Z]{2,20}$')

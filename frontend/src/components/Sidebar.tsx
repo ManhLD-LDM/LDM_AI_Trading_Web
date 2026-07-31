@@ -159,12 +159,12 @@ export default function Sidebar({ isOpen = false, onClose }: SidebarProps) {
                   </div>
 
                   <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
-                    <span>Entry: <strong className="text-blue-400">${plan.entryZone.idealEntry.toLocaleString()}</strong></span>
+                    <span>Entry: <strong className="text-blue-400">{isWait || !plan.entryZone?.idealEntry ? '0 (Đứng ngoài)' : `$${plan.entryZone.idealEntry.toLocaleString()}`}</strong></span>
                     <span className="text-emerald-400 font-bold">{plan.confidence}%</span>
                   </div>
 
                   <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60 text-[10px]">
-                    <span className="text-rose-400">SL: ${plan.currentSlPrice || plan.stopLoss.price}</span>
+                    <span className="text-rose-400">SL: {isWait || !(plan.currentSlPrice || plan.stopLoss?.price) ? '0' : `$${(plan.currentSlPrice || plan.stopLoss.price).toLocaleString()}`}</span>
                     <span className="text-emerald-400 flex items-center gap-1 group-hover:translate-x-0.5 transition-transform font-bold">
                       <span>Chi tiết</span>
                       <ChevronRight size={12} />

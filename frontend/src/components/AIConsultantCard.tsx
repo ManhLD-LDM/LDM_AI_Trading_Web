@@ -236,63 +236,73 @@ export default function AIConsultantCard() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            
-            {/* Entry Zone */}
-            <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
-                  <Target size={14} /> Vùng Entry Đề xuất
-                </span>
-                <span className="text-[10px] font-mono text-zinc-400 font-bold">Lý tưởng</span>
-              </div>
-              <div className="text-lg font-bold font-mono text-blue-400">
-                ${aiConsultPlan.entryZone.idealEntry.toLocaleString()}
-              </div>
-              <div className="text-[11px] font-mono text-zinc-400 flex justify-between pt-1 border-t border-zinc-800">
-                <span>Khoảng mua:</span>
-                <span>${aiConsultPlan.entryZone.minPrice} - ${aiConsultPlan.entryZone.maxPrice}</span>
-              </div>
-            </div>
+          {/* Card grid for Entry, SL, TP */}
+          {(() => {
+            const isWait = aiConsultPlan.recommendation === 'WAIT' || aiConsultPlan.entryZone.idealEntry === 0;
 
-            {/* Stop Loss */}
-            <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
-                  <ShieldAlert size={14} /> Stop Loss (Cắt lỗ)
-                </span>
-                <span className="text-[10px] font-mono text-rose-400 font-bold">
-                  -{aiConsultPlan.stopLoss.percentage}%
-                </span>
-              </div>
-              <div className="text-lg font-bold font-mono text-rose-400">
-                ${aiConsultPlan.stopLoss.price.toLocaleString()}
-              </div>
-              <p className="text-[11px] text-zinc-400 leading-tight pt-1 border-t border-zinc-800 line-clamp-1" title={aiConsultPlan.stopLoss.rationale}>
-                {aiConsultPlan.stopLoss.rationale}
-              </p>
-            </div>
-
-            {/* Take Profit */}
-            <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
-                  <CheckCircle2 size={14} /> Take Profit (Chốt lời)
-                </span>
-                <span className="text-[10px] font-mono text-emerald-400 font-bold">
-                  R:R {aiConsultPlan.riskRewardRatio}
-                </span>
-              </div>
-              <div className="space-y-1 pt-0.5 font-mono text-xs">
-                {aiConsultPlan.takeProfit.map((tp, idx) => (
-                  <div key={idx} className="flex items-center justify-between">
-                    <span className="text-zinc-400">{tp.level}:</span>
-                    <span className="font-bold text-emerald-400">${tp.price.toLocaleString()}</span>
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {/* Entry Zone */}
+                <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-400 flex items-center gap-1.5">
+                      <Target size={14} /> Vùng Entry Đề xuất
+                    </span>
+                    <span className="text-[10px] font-mono text-zinc-400 font-bold">Lý tưởng</span>
                   </div>
-                ))}
+                  <div className="text-lg font-bold font-mono text-blue-400">
+                    {isWait ? '0 (Đứng ngoài)' : `$${aiConsultPlan.entryZone.idealEntry.toLocaleString()}`}
+                  </div>
+                  <div className="text-[11px] font-mono text-zinc-400 flex justify-between pt-1 border-t border-zinc-800">
+                    <span>Khoảng mua:</span>
+                    <span>{isWait ? '0' : `$${aiConsultPlan.entryZone.minPrice} - $${aiConsultPlan.entryZone.maxPrice}`}</span>
+                  </div>
+                </div>
+
+                {/* Stop Loss */}
+                <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5">
+                      <ShieldAlert size={14} /> Stop Loss (Cắt lỗ)
+                    </span>
+                    <span className="text-[10px] font-mono text-rose-400 font-bold">
+                      {isWait ? '0%' : `-${aiConsultPlan.stopLoss.percentage}%`}
+                    </span>
+                  </div>
+                  <div className="text-lg font-bold font-mono text-rose-400">
+                    {isWait ? '0' : `$${aiConsultPlan.stopLoss.price.toLocaleString()}`}
+                  </div>
+                  <p className="text-[11px] text-zinc-400 leading-tight pt-1 border-t border-zinc-800 line-clamp-1" title={aiConsultPlan.stopLoss.rationale || aiConsultPlan.stopLoss.method}>
+                    {aiConsultPlan.stopLoss.rationale || aiConsultPlan.stopLoss.method}
+                  </p>
+                </div>
+
+                {/* Take Profit */}
+                <div className="bg-zinc-950/40 p-3.5 rounded-xl border border-zinc-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                      <CheckCircle2 size={14} /> Take Profit (Chốt lời)
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                      {isWait ? '0' : `R:R ${aiConsultPlan.riskRewardRatio}`}
+                    </span>
+                  </div>
+                  <div className="space-y-1 pt-0.5 font-mono text-xs">
+                    {isWait || !aiConsultPlan.takeProfit || aiConsultPlan.takeProfit.length === 0 ? (
+                      <div className="text-zinc-400 italic text-[11px] py-1">Khuyên đứng ngoài — Entry & TP/SL = 0</div>
+                    ) : (
+                      aiConsultPlan.takeProfit.map((tp, idx) => (
+                        <div key={idx} className="flex items-center justify-between">
+                          <span className="text-zinc-400">{tp.level}:</span>
+                          <span className="font-bold text-emerald-400">${tp.price.toLocaleString()}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
+            );
+          })()}
 
           {/* Reasoning Accordion */}
           <div className="bg-zinc-950/40 rounded-xl border border-zinc-800 overflow-hidden">

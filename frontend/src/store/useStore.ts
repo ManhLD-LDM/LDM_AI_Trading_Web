@@ -46,6 +46,7 @@ export type AIConsultPlan = {
     price: number;
     percentage: number;
     rationale: string;
+    method?: string;
   };
   takeProfit: Array<{
     level: string;
@@ -198,7 +199,7 @@ export const useTradingStore = create<TradingStore>()((set, get) => {
 
       const updatedHistory = state.aiConsultHistory.map((plan) => {
         const planSym = plan.symbol.toUpperCase().replace('/', '');
-        if (planSym !== symUpper) return plan;
+        if (planSym !== symUpper || plan.recommendation === 'WAIT' || plan.entryZone?.idealEntry === 0) return plan;
 
         const isLong = plan.recommendation === 'LONG';
         const currentStatus = plan.status || 'PENDING';

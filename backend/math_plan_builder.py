@@ -231,15 +231,15 @@ def build_math_plan(
 
 
 def _build_wait_plan(current_price: float, atr: float, mode: str, confidence: int) -> dict:
-    """Khi signal = WAIT, trả về plan trung tính (chỉ quan sát, không vào lệnh)."""
+    """Khi signal = WAIT, trả về plan trung tính (chỉ quan sát, không vào lệnh). Entry, TP/SL đều bằng 0."""
     return {
         "recommendation": "WAIT",
         "confidence": confidence,
         "mode": mode.upper(),
         "entryZone": {
-            "minPrice": round(current_price, 2),
-            "maxPrice": round(current_price, 2),
-            "idealEntry": round(current_price, 2),
+            "minPrice": 0,
+            "maxPrice": 0,
+            "idealEntry": 0,
         },
         "stopLoss": {
             "price": 0,
@@ -251,3 +251,4 @@ def _build_wait_plan(current_price: float, atr: float, mode: str, confidence: in
         "suggestedLeverage": "N/A",
         "recommendedRiskPct": 0,
     }
+

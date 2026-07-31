@@ -612,7 +612,7 @@ export default function ChartComponent() {
     });
     priceLinesRef.current = [];
 
-    if (!aiConsultPlan) return;
+    if (!aiConsultPlan || aiConsultPlan.recommendation === 'WAIT' || aiConsultPlan.entryZone?.idealEntry === 0) return;
 
     try {
       // 1. Entry Line

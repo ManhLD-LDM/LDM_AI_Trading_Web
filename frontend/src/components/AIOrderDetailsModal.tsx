@@ -103,45 +103,48 @@ function RealLightweightSetupChart({ plan }: { plan: AIConsultPlan }) {
           priceLinesRef.current.forEach(l => series.removePriceLine(l));
           priceLinesRef.current = [];
 
-          // Overlay Price Lines
-          const lineEntry = series.createPriceLine({
-            price: entry,
-            color: '#3b82f6',
-            lineWidth: 2,
-            lineStyle: 0,
-            axisLabelVisible: true,
-            title: `ENTRY: $${entry.toLocaleString()}`,
-          });
+          const isWaitSignal = plan.recommendation === 'WAIT' || entry === 0;
+          if (!isWaitSignal) {
+            // Overlay Price Lines
+            const lineEntry = series.createPriceLine({
+              price: entry,
+              color: '#3b82f6',
+              lineWidth: 2,
+              lineStyle: 0,
+              axisLabelVisible: true,
+              title: `ENTRY: $${entry.toLocaleString()}`,
+            });
 
-          const isSlBe = plan.status === 'PARTIAL_TP1' || plan.status === 'WIN_BE';
-          const lineSL = series.createPriceLine({
-            price: sl,
-            color: isSlBe ? '#06b6d4' : '#f43f5e',
-            lineWidth: 2,
-            lineStyle: 0,
-            axisLabelVisible: true,
-            title: isSlBe ? `SL (Đã dời BE): $${sl.toLocaleString()}` : `SL (-${plan.stopLoss.percentage}%): $${sl.toLocaleString()}`,
-          });
+            const isSlBe = plan.status === 'PARTIAL_TP1' || plan.status === 'WIN_BE';
+            const lineSL = series.createPriceLine({
+              price: sl,
+              color: isSlBe ? '#06b6d4' : '#f43f5e',
+              lineWidth: 2,
+              lineStyle: 0,
+              axisLabelVisible: true,
+              title: isSlBe ? `SL (Đã dời BE): $${sl.toLocaleString()}` : `SL (-${plan.stopLoss.percentage}%): $${sl.toLocaleString()}`,
+            });
 
-          const lineTP1 = series.createPriceLine({
-            price: tp1,
-            color: '#10b981',
-            lineWidth: 2,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: `TP1 (Thắng 50%): $${tp1.toLocaleString()}`,
-          });
+            const lineTP1 = series.createPriceLine({
+              price: tp1,
+              color: '#10b981',
+              lineWidth: 2,
+              lineStyle: 2,
+              axisLabelVisible: true,
+              title: `TP1 (Thắng 50%): $${tp1.toLocaleString()}`,
+            });
 
-          const lineTP2 = series.createPriceLine({
-            price: tp2,
-            color: '#14b8a6',
-            lineWidth: 2,
-            lineStyle: 2,
-            axisLabelVisible: true,
-            title: `TP2 (Thắng 100%): $${tp2.toLocaleString()}`,
-          });
+            const lineTP2 = series.createPriceLine({
+              price: tp2,
+              color: '#14b8a6',
+              lineWidth: 2,
+              lineStyle: 2,
+              axisLabelVisible: true,
+              title: `TP2 (Thắng 100%): $${tp2.toLocaleString()}`,
+            });
 
-          priceLinesRef.current = [lineEntry, lineSL, lineTP1, lineTP2];
+            priceLinesRef.current = [lineEntry, lineSL, lineTP1, lineTP2];
+          }
           chart.timeScale().fitContent();
         }
       } catch (err) {
@@ -218,13 +221,13 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
   const isWait = plan.recommendation === 'WAIT';
   const isPending = !plan.status || plan.status === 'PENDING';
 
-  // Can attach to main chart ONLY if order is PENDING ("chờ Entry") or ACTIVE/PARTIAL_TP1 ("Đang chạy")
+  // Can attach to main chart ONLY if recommendation is NOT WAIT and order is PENDING ("chờ Entry") or ACTIVE/PARTIAL_TP1 ("Đang chạy")
   // Disabled if order has hit SL or closed completely (WIN_100, WIN_BE, LOSS)
-  const isAttachable = !plan.status || plan.status === 'PENDING' || plan.status === 'ACTIVE' || plan.status === 'PARTIAL_TP1';
+  const isAttachable = !isWait && (!plan.status || plan.status === 'PENDING' || plan.status === 'ACTIVE' || plan.status === 'PARTIAL_TP1');
   const isAttachedToMainChart = currentMainPlan?.id === plan.id || (currentMainPlan?.symbol === plan.symbol && currentMainPlan?.entryZone?.idealEntry === plan.entryZone?.idealEntry);
 
   const handleAttachToMainChart = () => {
-    if (!isAttachable) return;
+    if (!isAttachable || isWait) return;
     if (plan.symbol && plan.symbol !== pair) {
       setPair(plan.symbol);
     }
@@ -339,19 +342,27 @@ export default function AIOrderDetailsModal({ plan, isOpen, onClose }: AIOrderDe
           <div className="grid grid-cols-3 gap-3">
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono">
               <div className="text-[10px] text-zinc-400 mb-1">Entry Lý tưởng</div>
-              <div className="text-base font-bold text-blue-400">${plan.entryZone.idealEntry.toLocaleString()}</div>
+              <div className="text-base font-bold text-blue-400">
+                {isWait || !plan.entryZone?.idealEntry ? '0 (Đứng ngoài)' : `$${plan.entryZone.idealEntry.toLocaleString()}`}
+              </div>
             </div>
 
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono">
               <div className="text-[10px] text-zinc-400 mb-1">Stop Loss hiện tại</div>
-              <div className="text-base font-bold text-rose-400">${(plan.currentSlPrice || plan.stopLoss.price).toLocaleString()}</div>
-              <div className="text-[10px] text-rose-400/80">{plan.status === 'PARTIAL_TP1' ? 'Đã dời BE' : `-${plan.stopLoss.percentage}%`}</div>
+              <div className="text-base font-bold text-rose-400">
+                {isWait || !(plan.currentSlPrice || plan.stopLoss?.price) ? '0' : `$${(plan.currentSlPrice || plan.stopLoss.price).toLocaleString()}`}
+              </div>
+              <div className="text-[10px] text-rose-400/80">
+                {isWait ? '0%' : plan.status === 'PARTIAL_TP1' ? 'Đã dời BE' : `-${plan.stopLoss?.percentage || 0}%`}
+              </div>
             </div>
 
             <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 font-mono">
               <div className="text-[10px] text-zinc-400 mb-1">Risk:Reward</div>
-              <div className="text-base font-bold text-emerald-400">1 : {plan.riskRewardRatio}</div>
-              <div className="text-[10px] text-zinc-500">Leverage: {plan.suggestedLeverage}</div>
+              <div className="text-base font-bold text-emerald-400">
+                {isWait ? '0' : `1 : ${plan.riskRewardRatio}`}
+              </div>
+              <div className="text-[10px] text-zinc-500">Leverage: {isWait ? 'N/A' : plan.suggestedLeverage}</div>
             </div>
           </div>
 

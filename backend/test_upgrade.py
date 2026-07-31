@@ -35,9 +35,13 @@ print("TEST 3: Math Plan Builder — WAIT signal")
 print("=" * 60)
 plan3 = build_math_plan("WAIT", 50, 100000, 500, 99000, 101000, "SCALP")
 assert plan3["recommendation"] == "WAIT"
+assert plan3["entryZone"]["idealEntry"] == 0, f"WAIT idealEntry should be 0, got {plan3['entryZone']['idealEntry']}"
+assert plan3["stopLoss"]["price"] == 0, f"WAIT SL price should be 0, got {plan3['stopLoss']['price']}"
 assert plan3["riskRewardRatio"] == 0
 assert len(plan3["takeProfit"]) == 0
 print(f"  Recommendation = {plan3['recommendation']}")
+print(f"  Entry = {plan3['entryZone']['idealEntry']}")
+print(f"  SL = {plan3['stopLoss']['price']}")
 print(f"  R:R = {plan3['riskRewardRatio']}")
 print("  ✅ PASSED")
 
